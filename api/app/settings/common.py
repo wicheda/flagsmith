@@ -107,6 +107,7 @@ INSTALLED_APPS = [
     "environments.identities.traits",
     "features",
     "features.multivariate",
+    "features.versioning",
     "segments",
     "app",
     "e2etests",

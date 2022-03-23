@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 if typing.TYPE_CHECKING:
     from environments.identities.models import Identity
     from environments.models import Environment
+    from features.versioning.models import EnvironmentFeatureVersion
 
 
 class Feature(CustomLifecycleModelMixin, models.Model):
@@ -231,26 +232,14 @@ class FeatureState(LifecycleModel, models.Model):
     enabled = models.BooleanField(default=False)
     history = HistoricalRecords()
 
+    environment_feature_version = models.ForeignKey(
+        "versioning.EnvironmentFeatureVersion",
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="feature_states",
+    )
+
     class Meta:
-        # Note: this is manually overridden in the migrations for Oracle DBs to include
-        # all 4 unique fields in each of these constraints. See migration 0025.
-        constraints = [
-            UniqueConstraint(
-                fields=["environment", "feature", "feature_segment"],
-                condition=Q(identity__isnull=True),
-                name="unique_for_feature_segment",
-            ),
-            UniqueConstraint(
-                fields=["environment", "feature", "identity"],
-                condition=Q(feature_segment__isnull=True),
-                name="unique_for_identity",
-            ),
-            UniqueConstraint(
-                fields=["environment", "feature"],
-                condition=Q(identity__isnull=True, feature_segment__isnull=True),
-                name="unique_for_environment",
-            ),
-        ]
         ordering = ["id"]
 
     def __gt__(self, other):
@@ -287,7 +276,11 @@ class FeatureState(LifecycleModel, models.Model):
         # it has a feature_segment or an identity
         return not (other.feature_segment or other.identity)
 
-    def clone(self, env: "Environment") -> "FeatureState":
+    def clone(
+        self,
+        env: "Environment" = None,
+        environment_feature_version: "EnvironmentFeatureVersion" = None,
+    ) -> "FeatureState":
         # Clonning the Identity is not allowed because they are closely tied
         # to the enviroment
         assert self.identity is None
@@ -302,7 +295,8 @@ class FeatureState(LifecycleModel, models.Model):
             if self.feature_segment
             else None
         )
-        clone.environment = env
+        clone.environment = env or self.environment
+        clone.environment_feature_version = environment_feature_version
         clone.save()
         # clone the related objects
         self.feature_state_value.clone(clone)
