@@ -208,26 +208,23 @@ const ProjectSettingsPage = class extends Component {
                                                     </div>
                                                 </div>
                                             </FormGroup>
-                                            {
-                                                Utils.getFlagsmithHasFeature("case_sensitive_flags") && (
-                                                    <FormGroup className="mt-4">
-                                                        <h3>Case sensitive features</h3>
-                                                        <div className="row">
-                                                            <div className="col-md-10">
-                                                                <p>
-                                                                    By default, features are lower case in order to prevent human error. Enabling this will allow you to use upper case characters when creating features.
-                                                                </p>
-                                                            </div>
-                                                            <div className="col-md-2 text-right">
-                                                                <Switch
-                                                                    data-test="js-flag-case-sensitivity" disabled={isSaving} onChange={() => this.toggleCaseSensitivity(project, editProject)}
-                                                                    checked={!project.only_allow_lower_case_feature_names}
-                                                                />
-                                                            </div>
-                                                        </div>
-                                                    </FormGroup>
-                                                )
-                                            }
+                                            <FormGroup className="mt-4">
+                                                <h3>Case sensitive features</h3>
+                                                <div className="row">
+                                                    <div className="col-md-10">
+                                                        <p>
+                                                            By default, features are lower case in order to prevent human error. Enabling this will allow you to use upper case characters when creating features.
+                                                        </p>
+                                                    </div>
+                                                    <div className="col-md-2 text-right">
+                                                        <Switch
+                                                            data-test="js-flag-case-sensitivity" disabled={isSaving} onChange={() => this.toggleCaseSensitivity(project, editProject)}
+                                                            checked={!project.only_allow_lower_case_feature_names}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </FormGroup>
+
                                             {
                                                 Utils.getFlagsmithHasFeature("feature_name_regex") && (
                                                     <FormGroup className="mt-4">

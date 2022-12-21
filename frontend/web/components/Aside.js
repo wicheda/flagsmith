@@ -240,18 +240,16 @@ const Aside = class extends Component {
                                                         Segments
                                                     </NavLink>
 
-                                                    {Utils.getFlagsmithHasFeature('compare_environments') && (
-                                                        <NavLink
-                                                          id="integrations-link"
-                                                          activeClassName="active"
-                                                          className="aside__nav-item"
-                                                          to={`/project/${project.id}/environment/${environmentId}/compare`}
-                                                          exact
-                                                        >
-                                                            <span className="icon ion-md-git-pull-request aside__nav-item--icon"/>
-                                                            Compare
-                                                        </NavLink>
-                                                    )}
+                                                    <NavLink
+                                                      id="integrations-link"
+                                                      activeClassName="active"
+                                                      className="aside__nav-item"
+                                                      to={`/project/${project.id}/environment/${environmentId}/compare`}
+                                                      exact
+                                                    >
+                                                        <span className="icon ion-md-git-pull-request aside__nav-item--icon"/>
+                                                        Compare
+                                                    </NavLink>
 
                                                     <Permission level="project" permission="ADMIN" id={this.props.projectId}>
                                                         {({ permission, isLoading }) => permission && hasRbacPermission && (
