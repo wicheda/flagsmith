@@ -21,9 +21,9 @@ type AuditLogType = {
 const AuditLogPage: FC<AuditLogType> = (props) => {
     const projectId = props.match.params.projectId;
 
-    const [environment, setEnvironment] = useState(Utils.fromParam().env);
 
     const { env: envFilter } = Utils.fromParam();
+    const [environment, setEnvironment] = useState<string[]>(Utils.fromParam().env? [Utils.fromParam().env] : [] );
 
     const hasRbacPermission = Utils.getPlansPermission('AUDIT') || !Utils.getFlagsmithHasFeature('scaleup_audit');
     if (!hasRbacPermission) {
@@ -53,9 +53,11 @@ const AuditLogPage: FC<AuditLogType> = (props) => {
                                     {({ project }: { project: Project }) => (
                                         <Row>
                                             {project && project.environments && project.environments.map(env => (
-                                                <ToggleChip active={`${environment}` === `${env.id}`}
+                                                <ToggleChip active={environment?.includes(`${env.id}`)}
                                                             onClick={() => {
-                                                                setEnvironment(`${environment}` === `${env.id}`? undefined: env.id)
+                                                                const newEnvironments = environment.includes(`${env.id}`)?
+                                                                    environment.filter((v)=>v!==`${env.id}`) : environment.concat([`${env.id}`])
+                                                                setEnvironment(newEnvironments)
                                                             }}
                                                             className='mr-2 mb-4'>
                                                     {env.name}
