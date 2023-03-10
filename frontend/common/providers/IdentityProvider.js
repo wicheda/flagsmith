@@ -1,8 +1,8 @@
-import React, { Component } from 'react';
-import FeatureListStore from '../stores/feature-list-store';
-import IdentityStore from '../stores/identity-store';
+import React from 'react';
+import FeatureListStore from 'common/stores/feature-list-store';
+import IdentityStore from 'common/stores/identity-store';
 
-const IdentityProvider = class extends Component {
+const IdentityProvider = class extends React.Component {
     static displayName = 'IdentityProvider'
 
     constructor(props, context) {
@@ -44,7 +44,7 @@ const IdentityProvider = class extends Component {
         AppActions.toggleUserFlag({ identity, projectFlag, environmentFlag, identityFlag, environmentId });
     };
 
-    editFlag = ({ identity, projectFlag, environmentFlag, identityFlag, environmentId }) => {
+    editFeatureValue = ({ identity, projectFlag, environmentFlag, identityFlag, environmentId }) => {
         AppActions.editUserFlag({ identity, projectFlag, environmentFlag, identityFlag, environmentId });
     };
 
@@ -52,22 +52,29 @@ const IdentityProvider = class extends Component {
         AppActions.editTrait({ trait, identity, environmentId });
     };
 
+    createTrait = ({ trait, identity, environmentId, isCreate }) => {
+        AppActions.editTrait({ trait, identity, environmentId, isCreate });
+    };
+
     removeFlag = ({ environmentId, identity, identityFlag }) => {
         AppActions.removeUserFlag({ environmentId, identity, identityFlag });
     };
 
-    changeUserFlag = ({identity, identityFlag, environmentId, payload}) => {
-        AppActions.changeUserFlag({identity, identityFlag, environmentId, payload});
+    changeUserFlag = ({ identity, identityFlag, environmentId, payload }) => {
+        AppActions.changeUserFlag({ identity, identityFlag, environmentId, payload });
     };
 
     render() {
-        const { toggleFlag, editFlag, removeFlag, editTrait, changeUserFlag } = this;
+        const { toggleFlag, editFeatureValue, removeFlag, editTrait, changeUserFlag, createTrait } = this;
         return (
-            this.props.children({ ...this.state }, { toggleFlag, editFlag, removeFlag, editTrait, changeUserFlag })
+            this.props.children({ ...this.state }, { toggleFlag, editFeatureValue, createTrait, removeFlag, editTrait, changeUserFlag })
         );
     }
 };
 
-IdentityProvider.propTypes = {};
+IdentityProvider.propTypes = {
+    onSave: OptionalFunc,
+    children: OptionalFunc,
+};
 
 module.exports = IdentityProvider;

@@ -1,4 +1,4 @@
-import { Selector, t } from 'testcafe';
+import { RequestLogger, Selector, t } from 'testcafe';
 
 export const byId = id => `[data-test="${id}"]`;
 
@@ -14,6 +14,16 @@ export const waitForElementVisible = async (selector) => {
     console.log(`Waiting element visible ${selector}`);
     return t.expect(Selector(selector).visible).ok();
 };
+
+export const logResults = async (requests)=> {
+    console.log(JSON.stringify(requests.filter((v)=>{
+        if (!v.response || (v.response.statusCode >= 200 && v.response.statusCode < 300)) {
+            return false
+        }
+        return true
+    }), null, 2));
+    console.error(JSON.stringify((await t.getBrowserConsoleMessages()).error));
+}
 
 export const waitForElementNotExist = async (selector) => {
     console.log(`Waiting element not visible ${selector}`);
@@ -33,6 +43,8 @@ export const gotoSegments = async () => {
     await click('#segments-link');
 };
 
+export const getLogger = () => RequestLogger(/api\/v1/, { logResponseBody: false, stringifyResponseBody: false });
+
 export const gotoTraits = async () => {
     await click('#users-link');
     await click(byId('user-item-0'));
@@ -45,6 +57,8 @@ export const createTrait = async (index, id, value) => {
     await setText('[name="traitID"]', id);
     await setText('[name="traitValue"]', value);
     await click('#create-trait-btn');
+    await t.wait(2000);
+    await t.eval(() => location.reload(true));
     await waitForElementVisible(byId(`user-trait-value-${index}`));
     const expectedValue = typeof value === 'string' ? `"${value}"` : `${value}`;
     await assertTextContent(byId(`user-trait-value-${index}`), expectedValue);
@@ -65,24 +79,42 @@ export const viewFeature = async (index) => {
 };
 
 export const addSegmentOverrideConfig = async (index, value, selectionIndex = 0) => {
-    await click(byId('overrides'));
+    await click(byId('segment_overrides'));
     await click(byId(`select-segment-option-${selectionIndex}`));
+
     await waitForElementVisible(byId(`segment-override-value-${index}`));
     await setText(byId(`segment-override-value-${0}`), value);
+    await click(byId('segment-override-toggle-0'));
 };
 
-export const addSegmentOverride = async (index, value, selectionIndex = 0) => {
-    await click(byId('overrides'));
+export const addSegmentOverride = async (index, value, selectionIndex = 0, mvs) => {
+    await click(byId('segment_overrides'));
     await click(byId(`select-segment-option-${selectionIndex}`));
     await waitForElementVisible(byId(`segment-override-value-${index}`));
     if (value) {
         await click(`${byId(`segment-override-${0}`)} [role="switch"]`);
     }
+    if (mvs) {
+        await Promise.all(mvs.map(async (v, i) => {
+            await setText(`.segment-overrides ${byId(`featureVariationWeight${v.value}`)}`, v.weight);
+        }));
+    }
 };
-
 
 export const saveFeature = async () => {
     await click('#update-feature-btn');
+    await waitForElementVisible('.toast-message');
+    await waitForElementNotExist('.toast-message');
+    await closeModal();
+    await waitForElementNotExist('#create-feature-modal');
+};
+
+
+export const saveFeatureSegments = async () => {
+    await click('#update-feature-segments-btn');
+    await waitForElementVisible('.toast-message');
+    await waitForElementNotExist('.toast-message');
+    await closeModal();
     await waitForElementNotExist('#create-feature-modal');
 };
 
@@ -97,7 +129,7 @@ export const gotoFeature = async (index) => {
 };
 
 export const setSegmentOverrideIndex = async (index, newIndex) => {
-    await click(byId('overrides'));
+    await click(byId('segment_overrides'));
     await setText(byId(`sort-${index}`), `${newIndex}`);
 };
 
@@ -119,18 +151,32 @@ export const login = async (email, password) => {
     await waitForElementVisible('#project-select-page');
 };
 
-export const createRemoteConfig = async (index, name, value, description = 'description') => {
+export const createRemoteConfig = async (index, name, value, description = 'description', defaultOff, mvs = []) => {
     const expectedValue = typeof value === 'string' ? `"${value}"` : `${value}`;
     await gotoFeatures();
     await click('#show-create-feature-btn');
     await setText(byId('featureID'), name);
     await setText(byId('featureValue'), value);
     await setText(byId('featureDesc'), description);
+    if (!defaultOff) {
+        await click(byId('toggle-feature-button'));
+    }
+    await Promise.all(mvs.map(async (v, i) => {
+        await click(byId('add-variation'));
+
+        await setText(byId(`featureVariationValue${i}`), v.value);
+        await setText(byId(`featureVariationWeight${v.value}`), v.weight);
+    }));
     await click(byId('create-feature-btn'));
     await waitForElementVisible(byId(`feature-value-${index}`));
     await assertTextContent(byId(`feature-value-${index}`), expectedValue);
 };
-
+export const closeModal = async () => {
+    await t.click('body', {
+        offsetX: 50,
+        offsetY: 50,
+    });
+};
 export const createFeature = async (index, name, value, description = 'description') => {
     await gotoFeatures();
     await click('#show-create-feature-btn');
@@ -188,4 +234,11 @@ export const createSegment = async (index, id, rules) => {
     await waitForElementVisible(byId(`segment-${index}-name`));
     await assertTextContent(byId(`segment-${index}-name`), id);
 };
+
+export const waitAndRefresh = async (waitFor = 3000) => {
+    console.log(`Waiting for ${waitFor}ms, then refreshing.`);
+    await t.wait(waitFor);
+    await t.eval(() => location.reload());
+};
+
 export default {};

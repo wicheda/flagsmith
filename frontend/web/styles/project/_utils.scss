@@ -6,6 +6,9 @@
     clear: both;
     height: 0;
 }
+.bg-secondary {
+    background-color: $bt-brand-secondary;
+}
 .clearfix { display: inline-block; }
 /* start commented backslash hack \*/
 * html .clearfix { height: 1%; }
@@ -18,7 +21,9 @@
 .float-right{
     float:right;
 }
-
+.text-light {
+    color: white !important;
+}
 .form-cta {
     text-align: right;
 }
@@ -63,8 +68,15 @@
         transition: none!important;
     }
 }
+
 .e2e {
+    background-color: rgba(255,255,255,0.75);
     pointer-events: none !important;
+    position:fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 10000000000;
 }
 
 .show {
@@ -98,5 +110,62 @@
     transition: none !important;
     .modal-content {
         transition: none !important;
+    }
+}
+
+.text-primary {
+    color: $bt-brand-primary !important;
+}
+
+.text-primary {
+    color: $bt-brand-primary !important;
+}
+
+.unread {
+    display: inline-block;
+    border-radius: 20px;
+    background: $bt-brand-primary;
+    font-weight: bold;
+    padding-left: 5px;
+    padding-right: 5px;
+    height: 16px;
+    min-width: 16px;
+    color: #fff;
+    text-align: center;
+    line-height: 17px;
+    font-size: 11px;
+    cursor: pointer;
+    position: relative;
+    bottom: 1px;
+}
+.aside__environment-list-item.active {
+    .unread {
+        background-color: rgba(0,0,0,.2);
+    }
+}
+
+.justify-content-end {
+    justify-content: flex-end;
+}
+
+.widget-container {
+    padding: 10px;
+}
+
+.bg-primary {
+    background: $bt-brand-primary !important;
+}
+.dark {
+
+    .bg-primary {
+        background: $bt-brand-primary-dark !important;
+    }
+
+}
+
+.link-unstyled {
+    text-decoration: none;
+    &:hover {
+        text-decoration: none;
     }
 }

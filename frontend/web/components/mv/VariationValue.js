@@ -1,12 +1,15 @@
-import React, { FunctionComponent } from 'react';
+import React from 'react';
 import ValueEditor from '../ValueEditor'; // we need this to make JSX compile
-
+import Constants from 'common/constants';
 
 const VariationValue = ({
     value,
     onChange,
     weightTitle,
     onRemove,
+    readOnlyValue,
+    index,
+    disabled,
 }) => (
     <div className="panel panel--flat panel-without-heading mb-2">
         <div className="panel-content">
@@ -15,9 +18,10 @@ const VariationValue = ({
                     <InputGroup
                       component={(
                           <ValueEditor
-                            data-test="featureValue"
+                            data-test={`featureVariationValue${index}`}
                             name="featureValue" className="full-width"
                             value={Utils.getTypedValue(Utils.featureStateToValue(value))}
+                            disabled={disabled||readOnlyValue}
                             onChange={(e) => {
                                 onChange({
                                     ...value,
@@ -28,12 +32,13 @@ const VariationValue = ({
                           />
 )}
                       tooltip={Constants.strings.REMOTE_CONFIG_DESCRIPTION_VARIATION}
-                      title="Value"
+                      title="Variation Value"
                     />
                 </div>
-                <div className="ml-2" style={{ width: 200 }}>
+                <div className="ml-2" style={{ width: 210 }}>
                     <InputGroup
                       type="text"
+                      data-test={`featureVariationWeight${Utils.featureStateToValue(value)}`}
                       onChange={(e) => {
                           onChange({
                               ...value,
@@ -41,7 +46,7 @@ const VariationValue = ({
                           });
                       }}
                       value={value.default_percentage_allocation}
-                      inputProps={{ style: { marginTop: 2 }, maxLength: 3 }}
+                      inputProps={{ style: { marginTop: 2 }, maxLength: 3, readOnly: disabled }}
                       title={weightTitle}
                     />
                 </div>

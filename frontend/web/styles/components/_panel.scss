@@ -101,9 +101,6 @@
 		&.text-white {
 			color: white;
 		}
-		&.ion-ios-information-circle {
-			color: $panel-icon-background-color;
-		}
 	}
 	.panel-icon {
 		display: inline-block;
@@ -149,9 +146,14 @@
 
 .dark {
 	.panel {
-
+		.icon {
+			color: $dark-color;
+		}
 		.panel-content {
 			background-color: $panel-bg-dark;
+			.hljs-header,.chip {
+				background-color: $panel-bg-darker;
+			}
 		}
 		.panel-heading {
 			h1, h2, h3 {
@@ -164,6 +166,9 @@
 			color: $header-color-dark;
 
 			background-color: $panel-heading-bg-dark;
+			.ion-ios-information-circle {
+				color: $panel-icon-background-color;
+			}
 		}
 		border: none;
 		color: $panel-heading-color-dark;
@@ -171,6 +176,9 @@
 			color: $dark-highlight-color;
 			&:hover {
 				color: $dark-highlight-color !important;
+				&.text-white {
+					color: white !important;
+				}
 			}
 		}
 		.list-item:hover a {
@@ -188,8 +196,15 @@
 		.panel {
 			background-color: $panel-bg-darker;
 			.panel-content {
-				background-color: $panel-bg-darker;
+				background-color: $panel-bg-darker
 			}
 		}
+	}
+}
+
+
+a.text-white {
+	&:hover {
+		color: white !important;
 	}
 }

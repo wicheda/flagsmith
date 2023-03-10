@@ -2,12 +2,14 @@ import typing
 
 from django.db import models
 from django.db.models import Prefetch, Q
+from django.utils import timezone
 
-from environments.dynamodb import DynamoIdentityWrapper
+from environments.identities.managers import IdentityManager
 from environments.identities.traits.models import Trait
 from environments.models import Environment
 from features.models import FeatureState
 from features.multivariate.models import MultivariateFeatureStateValue
+from segments.models import Segment
 
 
 class Identity(models.Model):
@@ -17,7 +19,7 @@ class Identity(models.Model):
         Environment, related_name="identities", on_delete=models.CASCADE
     )
 
-    dynamo_wrapper = DynamoIdentityWrapper()
+    objects = IdentityManager()
 
     class Meta:
         verbose_name_plural = "Identities"
@@ -26,6 +28,20 @@ class Identity(models.Model):
         # hard code the table name after moving from the environments app to prevent
         # issues with production deployment due to multi server configuration.
         db_table = "environments_identity"
+        # Note that the environment / created_date index is added only to postgres, so we can add it concurrently to
+        # avoid any downtime. If people using MySQL / Oracle have issues with poor performance on the identities table,
+        # we can provide them the SQL to add it manually in a small window of downtime.
+        index_together = (("environment", "created_date"),)
+
+    def natural_key(self):
+        return self.identifier, self.environment.api_key
+
+    @property
+    def composite_key(self):
+        return f"{self.environment.api_key}_{self.identifier}"
+
+    def get_hash_key(self, use_mv_v2_evaluation: bool = False) -> str:
+        return self.composite_key if use_mv_v2_evaluation else str(self.id)
 
     def get_all_feature_states(self, traits: typing.List[Trait] = None):
         """
@@ -40,7 +56,7 @@ class Identity(models.Model):
         :return: (list) flags for an identity with the correct values based on
             identity / segment priorities
         """
-        segments = self.get_segments(traits=traits)
+        segments = self.get_segments(traits=traits, overrides_only=True)
 
         # define sub queries
         belongs_to_environment_query = Q(environment=self.environment)
@@ -50,12 +66,19 @@ class Identity(models.Model):
             feature_segment__environment=self.environment,
         )
         environment_default_query = Q(identity=None, feature_segment=None)
+        only_live_versions_query = Q(
+            live_from__lte=timezone.now(), version__isnull=False
+        )
 
         # define the full query
-        full_query = belongs_to_environment_query & (
-            overridden_for_identity_query
-            | overridden_for_segment_query
-            | environment_default_query
+        full_query = (
+            only_live_versions_query
+            & belongs_to_environment_query
+            & (
+                overridden_for_identity_query
+                | overridden_for_segment_query
+                | environment_default_query
+            )
         )
 
         select_related_args = [
@@ -86,25 +109,39 @@ class Identity(models.Model):
             if flag.feature_id not in identity_flags:
                 identity_flags[flag.feature_id] = flag
             else:
-                if flag > identity_flags[flag.feature_id]:
+                current_flag = identity_flags[flag.feature_id]
+                if flag > current_flag:
                     identity_flags[flag.feature_id] = flag
 
-        if self.environment.project.hide_disabled_flags:
-            # filter out any flags that are disabled if configured on the project
-            # Note: done here instead of the DB because of CH1245
+        if self.environment.get_hide_disabled_flags() is True:
+            # filter out any flags that are disabled
             return [value for value in identity_flags.values() if value.enabled]
 
         return list(identity_flags.values())
 
-    def get_segments(self, traits: typing.List[Trait] = None):
-        segments = []
+    def get_segments(
+        self, traits: typing.List[Trait] = None, overrides_only: bool = False
+    ) -> typing.List[Segment]:
+        """
+        Get the list of segments this identity is a part of.
+
+        :param traits: override the identity's traits when evaluating segments
+        :param overrides_only: only retrieve the segments which have a valid override in the environment
+        :return: List of matching segments
+        """
+        matching_segments = []
         traits = self.identity_traits.all() if traits is None else traits
 
-        for segment in self.environment.project.get_segments_from_cache():
-            if segment.does_identity_match(self, traits=traits):
-                segments.append(segment)
+        if overrides_only:
+            all_segments = self.environment.get_segments_from_cache()
+        else:
+            all_segments = self.environment.project.get_segments_from_cache()
 
-        return segments
+        for segment in all_segments:
+            if segment.does_identity_match(self, traits=traits):
+                matching_segments.append(segment)
+
+        return matching_segments
 
     def get_all_user_traits(self):
         # this is pointless, we should probably replace all uses with the below code
@@ -123,6 +160,11 @@ class Identity(models.Model):
         :return: list of TraitModels
         """
         trait_models = []
+
+        # Remove traits having Null(None) values
+        trait_data_items = filter(
+            lambda trait: trait["trait_value"] is not None, trait_data_items
+        )
         for trait_data_item in trait_data_items:
             trait_key = trait_data_item["trait_key"]
             trait_value = trait_data_item["trait_value"]
@@ -147,9 +189,11 @@ class Identity(models.Model):
         :param trait_data_items: list of dictionaries validated by TraitSerializerFull
         :return: queryset of updated trait models
         """
-        current_traits = self.get_all_user_traits()
+        current_traits = {t.trait_key: t for t in self.identity_traits.all()}
 
         keys_to_delete = []
+        new_traits = []
+        updated_traits = []
 
         for trait_data_item in trait_data_items:
             trait_key = trait_data_item["trait_key"]
@@ -163,20 +207,32 @@ class Identity(models.Model):
 
             trait_value_data = Trait.generate_trait_value_data(trait_value)
 
-            if current_traits.filter(trait_key=trait_key).exists():
-                current_trait = current_traits.get(trait_key=trait_key)
+            if trait_key in current_traits:
+                current_trait = current_traits[trait_key]
+                # Don't update the trait if the value hasn't changed
+                if current_trait.trait_value == trait_value:
+                    continue
+
                 for attr, value in trait_value_data.items():
                     setattr(current_trait, attr, value)
-                current_trait.save()
+                updated_traits.append(current_trait)
             else:
-                # use update_or_create to avoid race condition
-                kwargs = {"trait_key": trait_key, "identity": self}
-                Trait.objects.update_or_create(defaults=trait_value_data, **kwargs)
+                new_traits.append(
+                    Trait(**trait_value_data, trait_key=trait_key, identity=self)
+                )
 
         # delete the traits that had their keys set to None
         if keys_to_delete:
-            current_traits.filter(trait_key__in=keys_to_delete).delete()
+            self.identity_traits.filter(trait_key__in=keys_to_delete).delete()
+
+        Trait.objects.bulk_update(updated_traits, fields=Trait.BULK_UPDATE_FIELDS)
+
+        # use ignore_conflicts to handle race conditions which result in IntegrityError if another request
+        # has added a particular trait_key for the identity while this method has been determining what to
+        # update or create.
+        # See: https://github.com/Flagsmith/flagsmith/issues/370
+        Trait.objects.bulk_create(new_traits, ignore_conflicts=True)
 
         # return the full list of traits for this identity by refreshing from the db
         # TODO: handle this in the above logic to avoid a second hit to the DB
-        return self.get_all_user_traits()
+        return self.identity_traits.all()

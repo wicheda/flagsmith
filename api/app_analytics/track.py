@@ -12,18 +12,20 @@ from util.util import postpone
 
 logger = logging.getLogger(__name__)
 
-environment_cache = caches[settings.ENVIRONMENT_CACHE_LOCATION]
+environment_cache = caches[settings.ENVIRONMENT_CACHE_NAME]
 
 GOOGLE_ANALYTICS_BASE_URL = "https://www.google-analytics.com"
 GOOGLE_ANALYTICS_COLLECT_URL = GOOGLE_ANALYTICS_BASE_URL + "/collect"
 GOOGLE_ANALYTICS_BATCH_URL = GOOGLE_ANALYTICS_BASE_URL + "/batch"
 DEFAULT_DATA = "v=1&tid=" + settings.GOOGLE_ANALYTICS_KEY
 
-# dictionary of resources to their corresponding actions when tracking events in GA
+# dictionary of resources to their corresponding actions
+# when tracking events in GA / Influx
 TRACKED_RESOURCE_ACTIONS = {
     "flags": "flags",
     "identities": "identity_flags",
     "traits": "traits",
+    "environment-document": "environment_document",
 }
 
 
@@ -132,8 +134,8 @@ def track_feature_evaluation_influxdb(environment_id, feature_evaluations):
     """
     influxdb = InfluxDBWrapper("feature_evaluation")
 
-    for feature_id, evaluation_count in feature_evaluations.items():
-        tags = {"feature_id": feature_id, "environment_id": environment_id}
+    for feature_name, evaluation_count in feature_evaluations.items():
+        tags = {"feature_id": feature_name, "environment_id": environment_id}
         influxdb.add_data_point("request_count", evaluation_count, tags=tags)
 
     influxdb.write()

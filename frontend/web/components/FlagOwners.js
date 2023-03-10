@@ -1,8 +1,7 @@
 import React, { Component } from 'react';
-import { ListItem } from '@material-ui/core';
 import data from '../../common/data/base/_data';
 import UserSelect from './UserSelect';
-import AuditLogIcon from './svg/AuditLogIcon';
+import ConfigProvider from 'common/providers/ConfigProvider';
 
 class TheComponent extends Component {
     state = {};
@@ -12,7 +11,7 @@ class TheComponent extends Component {
     }
 
     getData = () => {
-        data.get(`${Project.api}/projects/${this.props.projectId}/features/${this.props.id}/`)
+        data.get(`${Project.api}projects/${this.props.projectId}/features/${this.props.id}/`)
             .then((res) => {
                 const owners = (res.owners || []).map(v => v.id);
                 this.setState({ owners });
@@ -21,26 +20,26 @@ class TheComponent extends Component {
 
     addOwner = (id) => {
         this.setState({ owners: (this.state.owners || []).concat(id) });
-        data.post(`${Project.api}/projects/${this.props.projectId}/features/${this.props.id}/add-owners/`, {
+        data.post(`${Project.api}projects/${this.props.projectId}/features/${this.props.id}/add-owners/`, {
             user_ids: [id],
         });
     }
 
     removeOwner = (id) => {
         this.setState({ owners: (this.state.owners || []).filter(v => v !== id) });
-        data.post(`${Project.api}/projects/${this.props.projectId}/features/${this.props.id}/remove-owners/`, {
+        data.post(`${Project.api}projects/${this.props.projectId}/features/${this.props.id}/remove-owners/`, {
             user_ids: [id],
         });
     }
 
-    getOwners = (users, owners) => users.filter(v => owners.includes(v.id))
+    getOwners = (users, owners) => (users ? users.filter(v => owners.includes(v.id)) : [])
 
     render() {
-        const hasPermission = !this.props.hasFeature('plan_based_access') || Utils.getPlansPermission(AccountStore.getPlans(), 'FLAG_OWNERS');
+        const hasPermission = Utils.getPlansPermission('FLAG_OWNERS');
 
         return (
             <OrganisationProvider>
-                {({ isLoading, name, error, projects, usage, users, invites, influx_data, inviteLinks }) => {
+                {({ users }) => {
                     const ownerUsers = this.getOwners(users, this.state.owners || []);
                     const res = (
                         <div>
@@ -83,11 +82,10 @@ class TheComponent extends Component {
                         </div>
                     );
                     return hasPermission ? res : (
-                        <Tooltip
-                          title={res}
-                        >
-                            The add flag assignees feature is available with our startup plan
-                        </Tooltip>
+                        <div>
+                            {res}
+                            The add flag assignees feature is available with our <strong>Scale-up</strong> plan.
+                        </div>
                     );
                 }}
             </OrganisationProvider>
@@ -95,4 +93,4 @@ class TheComponent extends Component {
     }
 }
 
-export default hot(module)(ConfigProvider(TheComponent));
+export default ConfigProvider(TheComponent);

@@ -1,14 +1,14 @@
-import React, { Component } from 'react';
-import ProjectStore from '../stores/project-store';
-import OrganisationStore from '../stores/organisation-store';
+import React from 'react';
+import ProjectStore from 'common/stores/project-store';
+import OrganisationStore from 'common/stores/organisation-store';
 
-const ProjectProvider = class extends Component {
+const ProjectProvider = class extends React.Component {
     static displayName = 'ProjectProvider'
 
     constructor(props, context) {
         super(props, context);
         this.state = Object.assign({
-            isLoading: !ProjectStore.getEnvs() || ProjectStore.id != this.props.id,
+            isLoading: !ProjectStore.getEnvs() || ProjectStore.id !== this.props.id,
         }, { project: ProjectStore.model || {} });
         ES6Component(this);
         this.listenTo(ProjectStore, 'saved', () => {
@@ -31,8 +31,8 @@ const ProjectProvider = class extends Component {
         });
     }
 
-    createEnv = (env, projectId, cloneId) => {
-        AppActions.createEnv(env, projectId,cloneId);
+    createEnv = (env, projectId, cloneId, description) => {
+        AppActions.createEnv(env, projectId, cloneId, description);
     }
 
     editEnv = (env) => {
@@ -67,6 +67,12 @@ const ProjectProvider = class extends Component {
     }
 };
 
-ProjectProvider.propTypes = {};
+ProjectProvider.propTypes = {
+    children: OptionalFunc,
+    onRemove: RequiredFunc,
+    onSave: OptionalFunc,
+    id: RequiredString,
+    onRemoveEnvironment: RequiredFunc,
+};
 
 module.exports = ProjectProvider;

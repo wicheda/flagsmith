@@ -18,7 +18,10 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 
-from organisations.exceptions import OrganisationHasNoSubscription
+from organisations.exceptions import (
+    OrganisationHasNoSubscription,
+    SubscriptionNotFound,
+)
 from organisations.models import (
     OrganisationRole,
     OrganisationWebhook,
@@ -31,16 +34,18 @@ from organisations.permissions.permissions import (
 )
 from organisations.serializers import (
     GetHostedPageForSubscriptionUpgradeSerializer,
+    InfluxDataQuerySerializer,
     InfluxDataSerializer,
     MultiInvitesSerializer,
     OrganisationSerializerFull,
     OrganisationWebhookSerializer,
     PortalUrlSerializer,
+    SubscriptionDetailsSerializer,
     UpdateSubscriptionSerializer,
 )
 from permissions.serializers import (
-    MyUserObjectPermissionsSerializer,
     PermissionModelSerializer,
+    UserObjectPermissionsSerializer,
 )
 from projects.serializers import ProjectSerializer
 from users.serializers import UserIdSerializer
@@ -69,7 +74,9 @@ class OrganisationViewSet(viewsets.ModelViewSet):
         elif self.action == "permissions":
             return PermissionModelSerializer
         elif self.action == "my_permissions":
-            return MyUserObjectPermissionsSerializer
+            return UserObjectPermissionsSerializer
+        elif self.action == "get_subscription_metadata":
+            return SubscriptionDetailsSerializer
         return OrganisationSerializerFull
 
     def get_serializer_context(self):
@@ -128,10 +135,16 @@ class OrganisationViewSet(viewsets.ModelViewSet):
         serializer.save()
         return Response(serializer.data, status=200)
 
-    @action(detail=True, methods=["GET"])
+    @swagger_auto_schema(
+        deprecated=True,
+        operation_description="Please use ​​/api​/v1​/organisations​/{organisation_pk}​/usage-data​/total-count​/",
+    )
+    @action(
+        detail=True,
+        methods=["GET"],
+    )
     def usage(self, request, pk):
         organisation = self.get_object()
-
         try:
             events = get_events_for_organisation(organisation.id)
         except (TypeError, ValueError):
@@ -154,6 +167,20 @@ class OrganisationViewSet(viewsets.ModelViewSet):
             OrganisationSerializerFull(instance=self.get_object()).data,
             status=status.HTTP_200_OK,
         )
+
+    @action(
+        detail=True,
+        methods=["GET"],
+        url_path="get-subscription-metadata",
+    )
+    def get_subscription_metadata(self, request, pk):
+        organisation = self.get_object()
+        if not organisation.has_subscription():
+            raise SubscriptionNotFound()
+
+        subscription_details = organisation.subscription.get_subscription_metadata()
+        serializer = self.get_serializer(instance=subscription_details)
+        return Response(serializer.data)
 
     @action(detail=True, methods=["GET"], url_path="portal-url")
     def get_portal_url(self, request, pk):
@@ -186,10 +213,21 @@ class OrganisationViewSet(viewsets.ModelViewSet):
         serializer.save()
         return Response(serializer.data)
 
+    @swagger_auto_schema(
+        deprecated=True,
+        operation_description="Please use ​​/api​/v1​/organisations​/{organisation_pk}​/usage-data​/",
+        query_serializer=InfluxDataQuerySerializer(),
+    )
     @action(detail=True, methods=["GET"], url_path="influx-data")
     def get_influx_data(self, request, pk):
+        filters = InfluxDataQuerySerializer(data=request.query_params)
+        filters.is_valid(raise_exception=True)
         serializer = self.get_serializer(
-            data={"events_list": get_multiple_event_list_for_organisation(pk)}
+            data={
+                "events_list": get_multiple_event_list_for_organisation(
+                    pk, **filters.data
+                )
+            }
         )
         serializer.is_valid(raise_exception=True)
         return Response(serializer.data)
@@ -207,7 +245,7 @@ class OrganisationViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(
             instance={
                 "permissions": permission_keys,
-                "admin": request.user.is_admin(org),
+                "admin": request.user.is_organisation_admin(org),
             }
         )
         return Response(serializer.data)
@@ -247,7 +285,8 @@ def chargebee_webhook(request):
                 existing_subscription.update_plan(subscription_data.get("plan_id"))
         elif subscription_status in ("non_renewing", "cancelled"):
             existing_subscription.cancel(
-                datetime.fromtimestamp(subscription_data.get("current_term_end"))
+                datetime.fromtimestamp(subscription_data.get("current_term_end")),
+                update_chargebee=False,
             )
 
     return Response(status=status.HTTP_200_OK)

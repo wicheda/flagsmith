@@ -4,10 +4,10 @@ from unittest import mock
 from unittest.case import TestCase
 
 import pytest
+from core.constants import FLAGSMITH_UPDATED_AT_HEADER
 from django.test import override_settings
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.request import Request
 from rest_framework.test import APIClient, APITestCase
 
 from environments.identities.helpers import (
@@ -15,7 +15,7 @@ from environments.identities.helpers import (
 )
 from environments.identities.models import Identity
 from environments.identities.traits.models import Trait
-from environments.models import Environment
+from environments.models import Environment, EnvironmentAPIKey
 from features.models import Feature, FeatureSegment, FeatureState
 from integrations.amplitude.models import AmplitudeConfiguration
 from organisations.models import Organisation, OrganisationRole
@@ -285,7 +285,7 @@ class SDKIdentitiesTestCase(APITestCase):
     def setUp(self) -> None:
         self.organisation = Organisation.objects.create(name="Test Org")
         self.project = Project.objects.create(
-            organisation=self.organisation, name="Test Project"
+            organisation=self.organisation, name="Test Project", enable_dynamo_db=True
         )
         self.environment = Environment.objects.create(
             project=self.project, name="Test Environment"
@@ -584,7 +584,65 @@ class SDKIdentitiesTestCase(APITestCase):
         # and amplitude identify users should not be called
         mock_amplitude_wrapper.assert_not_called()
 
-    def test_post_identify_with_persistence(self):
+    def test_post_identify_with_new_identity_work_with_null_trait_value(self):
+        # Given
+        url = reverse("api-v1:sdk-identities")
+        data = {
+            "identifier": "new_identity",
+            "traits": [
+                {"trait_key": "trait_that_does_not_exists", "trait_value": None},
+            ],
+        }
+
+        # When
+        self.client.credentials(HTTP_X_ENVIRONMENT_KEY=self.environment.api_key)
+        response = self.client.post(
+            url, data=json.dumps(data), content_type="application/json"
+        )
+
+        # Then
+        assert response.status_code == status.HTTP_200_OK
+        assert self.identity.identity_traits.count() == 0
+
+    def test_post_identify_deletes_a_trait_if_trait_value_is_none(self):
+        # Given
+        url = reverse("api-v1:sdk-identities")
+        trait_1 = Trait.objects.create(
+            identity=self.identity,
+            trait_key="trait_key_1",
+            value_type="STRING",
+            string_value="trait_value",
+        )
+        trait_2 = Trait.objects.create(
+            identity=self.identity,
+            trait_key="trait_key_2",
+            value_type="STRING",
+            string_value="trait_value",
+        )
+
+        data = {
+            "identifier": self.identity.identifier,
+            "traits": [
+                {"trait_key": trait_1.trait_key, "trait_value": None},
+                {"trait_key": "trait_that_does_not_exists", "trait_value": None},
+            ],
+        }
+
+        # When
+        self.client.credentials(HTTP_X_ENVIRONMENT_KEY=self.environment.api_key)
+        response = self.client.post(
+            url, data=json.dumps(data), content_type="application/json"
+        )
+
+        # Then
+        assert response.status_code == status.HTTP_200_OK
+        assert self.identity.identity_traits.count() == 1
+        assert self.identity.identity_traits.filter(
+            trait_key=trait_2.trait_key
+        ).exists()
+
+    @mock.patch("sse.decorators.send_identity_update_message", autospec=True)
+    def test_post_identify_with_persistence(self, mock_send_identity_update_message):
         # Given
         url = reverse("api-v1:sdk-identities")
 
@@ -612,8 +670,13 @@ class SDKIdentitiesTestCase(APITestCase):
 
         # and the traits ARE persisted
         assert self.identity.identity_traits.count() == 2
+        # and send_identity_update_message is called
+        mock_send_identity_update_message.assert_called_once_with(
+            self.environment, self.identity.identifier
+        )
 
-    def test_post_identify_without_persistence(self):
+    @mock.patch("sse.decorators.send_identity_update_message", autospec=True)
+    def test_post_identify_without_persistence(self, mock_send_identity_update_message):
         # Given
         url = reverse("api-v1:sdk-identities")
 
@@ -646,6 +709,9 @@ class SDKIdentitiesTestCase(APITestCase):
         # and the traits ARE NOT persisted
         assert self.identity.identity_traits.count() == 0
 
+        # and send_identity_update_message was not called
+        mock_send_identity_update_message.assert_not_called()
+
     @override_settings(EDGE_API_URL="http://localhost")
     @mock.patch("environments.identities.views.forward_identity_request")
     def test_post_identities_calls_forward_identity_request_with_correct_arguments(
@@ -666,11 +732,13 @@ class SDKIdentitiesTestCase(APITestCase):
         self.client.post(url, data=json.dumps(data), content_type="application/json")
 
         # Then
-        args, kwargs = mocked_forward_identity_request.call_args_list[0]
-        assert kwargs == {}
-        assert isinstance(args[0], Request)
-        assert args[0].data == data
-        assert args[1] == self.environment.project.id
+        args, kwargs = mocked_forward_identity_request.delay.call_args_list[0]
+        assert args == ()
+        assert kwargs["args"][0] == "POST"
+        assert kwargs["args"][1].get("X-Environment-Key") == self.environment.api_key
+        assert kwargs["args"][2] == self.environment.project.id
+
+        assert kwargs["kwargs"]["request_data"] == data
 
     @override_settings(EDGE_API_URL="http://localhost")
     @mock.patch("environments.identities.views.forward_identity_request")
@@ -685,7 +753,89 @@ class SDKIdentitiesTestCase(APITestCase):
         self.client.get(url)
 
         # Then
-        args, kwargs = mocked_forward_identity_request.call_args_list[0]
-        assert kwargs == {}
-        assert isinstance(args[0], Request)
-        assert args[1] == self.environment.project.id
+        args, kwargs = mocked_forward_identity_request.delay.call_args_list[0]
+        assert args == ()
+        assert kwargs["args"][0] == "GET"
+        assert kwargs["args"][1].get("X-Environment-Key") == self.environment.api_key
+        assert kwargs["args"][2] == self.environment.project.id
+
+        assert kwargs["kwargs"]["query_params"] == {
+            "identifier": self.identity.identifier
+        }
+
+    def test_post_identities_with_traits_fails_if_client_cannot_set_traits(self):
+        # Given
+        url = reverse("api-v1:sdk-identities")
+        data = {
+            "identifier": self.identity.identifier,
+            "traits": [{"trait_key": "foo", "trait_value": "bar"}],
+        }
+
+        self.environment.allow_client_traits = False
+        self.environment.save()
+
+        # When
+        response = self.client.post(
+            url, data=json.dumps(data), content_type="application/json"
+        )
+
+        # Then
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_post_identities_with_traits_success_if_client_cannot_set_traits_server_key(
+        self,
+    ):
+        # Given
+        url = reverse("api-v1:sdk-identities")
+        data = {
+            "identifier": self.identity.identifier,
+            "traits": [{"trait_key": "foo", "trait_value": "bar"}],
+        }
+
+        environment_api_key = EnvironmentAPIKey.objects.create(
+            environment=self.environment
+        )
+        self.client.credentials(HTTP_X_ENVIRONMENT_KEY=environment_api_key.key)
+
+        self.environment.allow_client_traits = False
+        self.environment.save()
+
+        # When
+        response = self.client.post(
+            url, data=json.dumps(data), content_type="application/json"
+        )
+
+        # Then
+        assert response.status_code == status.HTTP_200_OK
+
+    def test_post_identities_request_includes_updated_at_header(self):
+        # Given
+        url = reverse("api-v1:sdk-identities")
+        data = {
+            "identifier": self.identity.identifier,
+            "traits": [{"trait_key": "foo", "trait_value": "bar"}],
+        }
+
+        # When
+        response = self.client.post(
+            url, data=json.dumps(data), content_type="application/json"
+        )
+
+        # Then
+        assert response.status_code == status.HTTP_200_OK
+        assert response.headers[FLAGSMITH_UPDATED_AT_HEADER] == str(
+            self.environment.updated_at.timestamp()
+        )
+
+    def test_get_identities_request_includes_updated_at_header(self):
+        # Given
+        url = "%s?identifier=identifier" % reverse("api-v1:sdk-identities")
+
+        # When
+        response = self.client.get(url)
+
+        # Then
+        assert response.status_code == status.HTTP_200_OK
+        assert response.headers[FLAGSMITH_UPDATED_AT_HEADER] == str(
+            self.environment.updated_at.timestamp()
+        )

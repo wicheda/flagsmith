@@ -1,13 +1,16 @@
 from django.conf import settings
 from django.contrib.auth.mixins import PermissionRequiredMixin
 from django.contrib.sites.shortcuts import get_current_site
+from django.db.models import QuerySet
 from django.http import Http404, HttpResponse
 from django.shortcuts import redirect
+from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.generic.edit import FormView
 from drf_yasg2.utils import swagger_auto_schema
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
@@ -19,6 +22,7 @@ from organisations.permissions.permissions import (
 from organisations.serializers import UserOrganisationSerializer
 from users.models import FFAdminUser, UserPermissionGroup
 from users.serializers import (
+    ListUsersQuerySerializer,
     UserIdsSerializer,
     UserListSerializer,
     UserPermissionGroupSerializerDetail,
@@ -62,17 +66,33 @@ class AdminInitView(View):
             )
 
 
+@method_decorator(
+    decorator=swagger_auto_schema(query_serializer=ListUsersQuerySerializer()),
+    name="list",
+)
 class FFAdminUserViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     permission_classes = (IsAuthenticated, OrganisationUsersPermission)
     pagination_class = None
 
     def get_queryset(self):
         if self.kwargs.get("organisation_pk"):
-            return FFAdminUser.objects.filter(
+            queryset = FFAdminUser.objects.filter(
                 organisations__id=self.kwargs.get("organisation_pk")
             )
+            queryset = self._apply_query_filters(queryset)
+            return queryset
         else:
             return FFAdminUser.objects.none()
+
+    def _apply_query_filters(self, queryset: QuerySet):
+        serializer = ListUsersQuerySerializer(data=self.request.query_params)
+        serializer.is_valid(raise_exception=True)
+        filter_data = serializer.data
+
+        if filter_data.get("exclude_current"):
+            queryset = queryset.exclude(id=self.request.user.id)
+
+        return queryset
 
     def get_serializer_class(self, *args, **kwargs):
         if self.action == "update_role":
@@ -135,8 +155,15 @@ class UserPermissionGroupViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["POST"], url_path="add-users")
     def add_users(self, request, organisation_pk, pk):
         group = self.get_object()
+        user_ids = request.data["user_ids"]
+
+        if request.user.id in user_ids and not request.user.is_organisation_admin(
+            Organisation.objects.get(pk=organisation_pk)
+        ):
+            raise PermissionDenied("Non-admin users cannot add themselves to a group.")
+
         try:
-            group.add_users_by_id(request.data["user_ids"])
+            group.add_users_by_id(user_ids)
         except FFAdminUser.DoesNotExist as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -149,5 +176,14 @@ class UserPermissionGroupViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["POST"], url_path="remove-users")
     def remove_users(self, request, organisation_pk, pk):
         group = self.get_object()
-        group.remove_users_by_id(request.data["user_ids"])
+        user_ids = request.data["user_ids"]
+
+        if request.user.id in user_ids and not request.user.is_organisation_admin(
+            Organisation.objects.get(pk=organisation_pk)
+        ):
+            raise PermissionDenied(
+                "Non-admin users cannot remove themselves from a group."
+            )
+
+        group.remove_users_by_id(user_ids)
         return Response(UserPermissionGroupSerializerDetail(instance=group).data)

@@ -1,10 +1,11 @@
-from django.db.models import Manager, Prefetch
+from django.db.models import Prefetch
+from softdelete.models import SoftDeleteManager
 
 from features.models import FeatureSegment, FeatureState
 from features.multivariate.models import MultivariateFeatureStateValue
 
 
-class EnvironmentManager(Manager):
+class EnvironmentManager(SoftDeleteManager):
     def filter_for_document_builder(self, *args, **kwargs):
         return (
             super(EnvironmentManager, self)
@@ -15,6 +16,7 @@ class EnvironmentManager(Manager):
                 "segment_config",
                 "amplitude_config",
                 "heap_config",
+                "dynatrace_config",
             )
             .prefetch_related(
                 Prefetch(
@@ -54,3 +56,9 @@ class EnvironmentManager(Manager):
             )
             .filter(*args, **kwargs)
         )
+
+    def get_queryset(self):
+        return super().get_queryset().select_related("project", "project__organisation")
+
+    def get_by_natural_key(self, api_key):
+        return self.get(api_key=api_key)

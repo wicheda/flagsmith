@@ -6,23 +6,24 @@ import logging
 from django.utils.decorators import method_decorator
 from drf_yasg2 import openapi
 from drf_yasg2.utils import swagger_auto_schema
-from flag_engine.django_transform.document_builders import (
-    build_environment_document,
-)
+from flag_engine.api.document_builders import build_environment_document
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from environments.permissions.permissions import (
     EnvironmentAdminPermission,
     EnvironmentPermissions,
+    MasterAPIKeyEnvironmentPermissions,
     NestedEnvironmentPermissions,
 )
 from permissions.serializers import (
-    MyUserObjectPermissionsSerializer,
     PermissionModelSerializer,
+    UserObjectPermissionsSerializer,
 )
+from projects.models import Project
 from webhooks.mixins import TriggerSampleWebhookMixin
 from webhooks.webhooks import WebhookType
 
@@ -39,8 +40,9 @@ from .permissions.models import (
 )
 from .serializers import (
     CloneEnvironmentSerializer,
+    CreateUpdateEnvironmentSerializer,
     EnvironmentAPIKeySerializer,
-    EnvironmentSerializerLight,
+    EnvironmentSerializerWithMetadata,
     WebhookSerializer,
 )
 
@@ -63,7 +65,7 @@ logger = logging.getLogger(__name__)
 )
 class EnvironmentViewSet(viewsets.ModelViewSet):
     lookup_field = "api_key"
-    permission_classes = [IsAuthenticated, EnvironmentPermissions]
+    permission_classes = [EnvironmentPermissions | MasterAPIKeyEnvironmentPermissions]
 
     def get_serializer_class(self):
         if self.action == "trait_keys":
@@ -72,7 +74,9 @@ class EnvironmentViewSet(viewsets.ModelViewSet):
             return DeleteAllTraitKeysSerializer
         if self.action == "clone":
             return CloneEnvironmentSerializer
-        return EnvironmentSerializerLight
+        elif self.action in ("create", "update", "partial_update"):
+            return CreateUpdateEnvironmentSerializer
+        return EnvironmentSerializerWithMetadata
 
     def get_serializer_context(self):
         context = super(EnvironmentViewSet, self).get_serializer_context()
@@ -81,19 +85,33 @@ class EnvironmentViewSet(viewsets.ModelViewSet):
         return context
 
     def get_queryset(self):
-        queryset = self.request.user.get_permitted_environments(["VIEW_ENVIRONMENT"])
+        if self.action == "list":
+            project_id = self.request.query_params.get(
+                "project"
+            ) or self.request.data.get("project")
 
-        project_id = self.request.query_params.get("project")
-        if project_id:
-            queryset = queryset.filter(project__id=project_id)
+            try:
+                project = Project.objects.get(id=project_id)
+            except Project.DoesNotExist:
+                raise ValidationError("Invalid or missing value for project parameter.")
 
-        return queryset
+            if self.request.user.is_anonymous:
+                return (
+                    self.request.master_api_key.organisation.projects.environments.all()
+                )
+            return self.request.user.get_permitted_environments(
+                "VIEW_ENVIRONMENT", project=project
+            )
+
+        # Permission class handles validation of permissions for other actions
+        return Environment.objects.all()
 
     def perform_create(self, serializer):
         environment = serializer.save()
-        UserEnvironmentPermission.objects.create(
-            user=self.request.user, environment=environment, admin=True
-        )
+        if not self.request.user.is_anonymous:
+            UserEnvironmentPermission.objects.create(
+                user=self.request.user, environment=environment, admin=True
+            )
 
     @action(detail=True, methods=["GET"], url_path="trait-keys")
     def trait_keys(self, request, *args, **kwargs):
@@ -123,9 +141,12 @@ class EnvironmentViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         clone = serializer.save(source_env=self.get_object())
-        UserEnvironmentPermission.objects.create(
-            user=self.request.user, environment=clone, admin=True
-        )
+
+        if not self.request.user.is_anonymous:
+            UserEnvironmentPermission.objects.create(
+                user=self.request.user, environment=clone, admin=True
+            )
+
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["POST"], url_path="delete-traits")
@@ -149,7 +170,7 @@ class EnvironmentViewSet(viewsets.ModelViewSet):
             ).data
         )
 
-    @swagger_auto_schema(responses={200: MyUserObjectPermissionsSerializer})
+    @swagger_auto_schema(responses={200: UserObjectPermissionsSerializer})
     @action(
         detail=True,
         methods=["GET"],
@@ -157,6 +178,14 @@ class EnvironmentViewSet(viewsets.ModelViewSet):
         url_name="my-permissions",
     )
     def user_permissions(self, request, *args, **kwargs):
+        if request.user.is_anonymous:
+            return Response(
+                status=status.HTTP_400_BAD_REQUEST,
+                data={
+                    "detail": "This endpoint can only be used with a user and not Master API Key"
+                },
+            )
+
         # TODO: tidy this mess up
         environment = self.get_object()
 
@@ -194,7 +223,7 @@ class EnvironmentViewSet(viewsets.ModelViewSet):
             "permissions": permissions,
         }
 
-        serializer = MyUserObjectPermissionsSerializer(data=data)
+        serializer = UserObjectPermissionsSerializer(data=data)
         serializer.is_valid()
 
         return Response(serializer.data)

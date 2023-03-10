@@ -1,3 +1,11 @@
+#modal2 {
+    .modal {
+        z-index: 20000000;
+        background-color: rgba(0, 0, 0, 0.25);
+    }
+}
+
+
 .modal{
     z-index: 100000;
     .modal-content {
@@ -76,7 +84,8 @@ $side-width: 66%;
 
     .modal-body {
         padding: 0;
-        height: 100%;
+        height: calc(100% - 60px);
+        overflow-y: auto;
     }
 
     z-index: 10000000;
@@ -142,25 +151,24 @@ $side-width: 66%;
         height:100%;
         border-radius: 0;
     }
-    #create-feature-modal {
-        position: relative;
-        padding-left: 10px;
-        padding-right: 10px;
-        height: calc(100% - 190px);
-        overflow-y: scroll;
+    &.create-feature-modal {
+        .modal-body {
+            overflow-y: hidden;
+        }
         .tabs {
-            margin-top: 10px;
-            .tabs-content {
-                margin-top: 20px;
+            .tab-item {
+                margin-top: 16px;
+                overflow-y: auto;
+                height: calc(100vh - 100px);
             }
         }
-        .tabs-nav {
-            .btn.btn-tab {
-                //border-radius: 0 !important;
-                //background-color: white;
-            }
+        .create-feature-tab {
+            margin-top: 16px;
+            overflow-y: auto;
+            height: calc(100vh - 100px);
         }
     }
+
 }
 
 .disable-transitions {
@@ -289,5 +297,13 @@ $side-width: 66%;
     }
     .side-modal #create-feature-modal {
         height: 100%;
+    }
+}
+
+.create-segment-modal.modal-open,.create-segment-modal .modal-body {
+    overflow-y: hidden !important;
+    .tab-item {
+        height: calc(100vh - 100px);
+        overflow-y: auto;
     }
 }

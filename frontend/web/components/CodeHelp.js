@@ -2,6 +2,8 @@ import React, { Component } from 'react';
 import Tabs from './base/forms/Tabs';
 import TabItem from './base/forms/TabItem';
 import Highlight from './Highlight';
+import ConfigProvider from 'common/providers/ConfigProvider';
+import Constants from 'common/constants';
 
 const getGithubLink = (key) => {
     switch (key) {
@@ -24,6 +26,10 @@ const getGithubLink = (key) => {
         case 'REST':
             return 'https://docs.flagsmith.com/clients/rest/';
         case 'React Native':
+            return 'https://github.com/flagsmith/flagsmith-js-client/';
+        case 'React':
+            return 'https://github.com/flagsmith/flagsmith-js-client/';
+        case 'Next.js':
             return 'https://github.com/flagsmith/flagsmith-js-client/';
         case 'Ruby':
             return 'https://github.com/flagsmith/flagsmith-ruby-client/';
@@ -55,14 +61,18 @@ const getDocsLink = (key) => {
             return 'https://docs.flagsmith.com/clients/python/';
         case 'REST':
             return null;
+        case 'React':
+            return 'https://docs.flagsmith.com/clients/react';
         case 'React Native':
-            return 'https://docs.flagsmith.com/clients/javascript/';
+            return 'https://docs.flagsmith.com/clients/react';
         case 'Ruby':
             return 'https://docs.flagsmith.com/clients/ruby/';
         case 'Rust':
             return 'https://docs.flagsmith.com/clients/rust/';
         case 'iOS':
             return 'https://docs.flagsmith.com/clients/ios/';
+        case 'Next.js':
+            return 'https://docs.flagsmith.com/clients/next-ssr';
         default:
             return 'https://docs.flagsmith.com';
     }
@@ -169,7 +179,7 @@ Code example:
                                     return (
                                         <TabItem key={key} tabLabel={key}>
                                             <div className="hljs-container mb-2">
-                                                <Highlight className={Constants.codeHelp.keys[key]}>
+                                                <Highlight forceExpanded preventEscape className={Constants.codeHelp.keys[key]}>
                                                     {s}
                                                 </Highlight>
                                                 <Button onClick={() => this.copy(s)} className="btn btn-primary hljs-copy">
@@ -181,7 +191,7 @@ Code example:
                                                           target="_blank" href={docs}
                                                           className="btn btn--docs"
                                                         >
-                                                            <ion className="icon ion ion-ios-document"/>
+                                                            <span className="icon ion ion-ios-document"/>
 
                                                             {' '}{key} Docs
                                                         </a>
@@ -191,7 +201,7 @@ Code example:
                                                           target="_blank" href={github}
                                                           className="btn btn--docs"
                                                         >
-                                                            <ion className="icon ion ion-logo-github"/>
+                                                            <span className="icon ion ion-logo-github"/>
                                                             {' '}{key} GitHub
                                                         </a>
                                                     )}

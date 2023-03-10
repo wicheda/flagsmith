@@ -4,7 +4,7 @@ import logging
 from django.conf import settings
 from django.http import HttpResponse, JsonResponse
 from django.template import loader
-from django.template.exceptions import TemplateDoesNotExist
+from django.views.decorators.csrf import csrf_exempt
 
 from . import utils
 
@@ -15,18 +15,19 @@ def version_info(request):
     return JsonResponse(utils.get_version_info())
 
 
+@csrf_exempt
 def index(request):
-    try:
-        template = loader.get_template("webpack/index.html")
-        context = {
-            "linkedin_api_key": settings.LINKEDIN_API_KEY,
-        }
-        return HttpResponse(template.render(context, request))
-    except TemplateDoesNotExist:
-        # If running without the front end assets (e.g. on elastic beanstalk),
-        # we don't want to throw a 500. In that case, just reply with 200.
-        logger.warning("FE assets do not exist, ignoring and returning HTTP 200.")
-        return HttpResponse()
+    if request.method != "GET":
+        logger.warning(
+            "Invalid request made to %s with method %s", request.path, request.method
+        )
+        return HttpResponse(status=405, content_type="application/json")
+
+    template = loader.get_template("webpack/index.html")
+    context = {
+        "linkedin_api_key": settings.LINKEDIN_API_KEY,
+    }
+    return HttpResponse(template.render(context, request))
 
 
 def project_overrides(request):
@@ -35,20 +36,24 @@ def project_overrides(request):
     It gets loaded as a script tag in the head of the browser when the frontend application starts up.
     """
     config_mapping_dict = {
+        "amplitude": "AMPLITUDE_API_KEY",
         "api": "API_URL",
         "assetURL": "ASSET_URL",
-        "maintenance": "MAINTENANCE_MODE",
-        "preventSignup": "PREVENT_SIGNUP",
+        "crispChat": "CRISP_CHAT_API_KEY",
         "disableInflux": "DISABLE_INFLUXDB_FEATURES",
-        "flagsmithAnalytics": "FLAGSMITH_ANALYTICS",
         "flagsmith": "FLAGSMITH_ON_FLAGSMITH_API_KEY",
+        "flagsmithAnalytics": "FLAGSMITH_ANALYTICS",
+        "flagsmithRealtime": "ENABLE_FLAGSMITH_REALTIME",
         "flagsmithClientAPI": "FLAGSMITH_ON_FLAGSMITH_API_URL",
         "ga": "GOOGLE_ANALYTICS_API_KEY",
+        "headway": "HEADWAY_API_KEY",
+        "hideInviteLinks": "DISABLE_INVITE_LINKS",
         "linkedin_api_key": "LINKEDIN_API_KEY",
-        "crispChat": "CRISP_CHAT_API_KEY",
+        "maintenance": "MAINTENANCE_MODE",
         "mixpanel": "MIXPANEL_API_KEY",
+        "preventEmailPassword": "PREVENT_EMAIL_PASSWORD",
+        "preventSignup": "PREVENT_SIGNUP",
         "sentry": "SENTRY_API_KEY",
-        "amplitude": "AMPLITUDE_API_KEY",
     }
 
     override_data = {

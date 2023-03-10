@@ -2,10 +2,8 @@
  * Created by kylejohnson on 25/07/2016.
  */
 import React, { Component } from 'react';
-import Constants from '../../../../common/constants';
-
-const FormGroup = class extends Component {
-    static displayName = 'FormGroup'
+const InputGroup = class extends Component {
+    static displayName = 'InputGroup'
 
     constructor(props, context) {
         super(props, context);
@@ -18,14 +16,14 @@ const FormGroup = class extends Component {
 
     render() {
         const { props } = this;
-        const id = this.props.id||Utils.GUID();
+        const id = this.props.id || Utils.GUID();
         const { inputProps } = this.props;
         return (
             <div className={`${this.props.className} form-group ${(this.props.isInvalid ? 'invalid' : '')}`}>
                 {this.props.tooltip ? (
                     <Tooltip
                       title={<label htmlFor={id} className="cols-sm-2 control-label">{props.title} <span className="icon ion-ios-information-circle"/></label>}
-                      place="right"
+                      place={this.props.tooltipPlace || 'right'}
                     >
                         {this.props.tooltip}
                     </Tooltip>
@@ -92,7 +90,7 @@ const FormGroup = class extends Component {
     }
 };
 
-FormGroup.propTypes = {
+InputGroup.propTypes = {
     disabled: OptionalBool,
     title: propTypes.any,
     isValid: propTypes.any,
@@ -103,4 +101,4 @@ FormGroup.propTypes = {
     placeholder: OptionalString,
 };
 
-module.exports = FormGroup;
+export default InputGroup

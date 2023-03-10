@@ -1,16 +1,16 @@
-import Utils from '../../utils/utils';
+module.exports = (envId, { FEATURE_NAME, FEATURE_NAME_ALT }, userId) => `
+use flagsmith::{Flag, Flagsmith, FlagsmithOptions};
 
-module.exports = (envId, { FEATURE_NAME, FEATURE_FUNCTION, USER_ID, FEATURE_NAME_ALT }) => `let bt = bullettrain::Client::new("${envId}");
+let options = FlagsmithOptions {..Default::default()};
+let flagsmith = Flagsmith::new(
+    "${envId}".to_string(),
+    options,
+);
 
-fn test_user() -> User {
-    User {
-        identifier: String::from("${USER_ID}"),
-    }
-}
-...
+// Identify the user
+let identity_flags = flagsmith.get_identity_flags("${userId}", None).unwrap();
 
-let hasFeature = client.has_user_feature(&test_user(), "${FEATURE_NAME}").unwrap();
-let featureValue = client.get_user_value(&test_user(), "${FEATURE_NAME_ALT}")
-        .unwrap()
-        .unwrap();
+// get the state / value of the user's flags
+let is_enabled = identity_flags.is_feature_enabled("${FEATURE_NAME}").unwrap();
+let feature_value = identity_flags.get_feature_value_as_string("${FEATURE_NAME_ALT}").unwrap();
 `;

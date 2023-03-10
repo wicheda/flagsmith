@@ -1,12 +1,6 @@
-import flagsmith from 'flagsmith'; // Add this line if you're using flagsmith via npm
-const _Project = require('../../common/project');
-
-window.Project = {
-    ..._Project,
-    ...window.projectOverrides, // environment.js (also app.yaml if using app engine)
-};
+import flagsmith from 'flagsmith';
 import 'ionicons/dist/css/ionicons.min.css';
-
+import * as Sentry from '@sentry/browser';
 // Optimise lodash
 import each from 'lodash/each';
 import map from 'lodash/map';
@@ -26,14 +20,15 @@ import get from 'lodash/get';
 import { isMobile } from 'react-device-detect';
 import propTypes from 'prop-types';
 import Bootstrap from '../../node_modules/bootstrap/dist/js/bootstrap';
-
+// Add this line if you're using flagsmith via npm
+const _Project = require('../../common/project');
 
 window.isMobile = isMobile || $(window).width() <= 576;
 
 window.flagsmith = flagsmith;
 window.moment = require('moment/min/moment.min');
 
-window._ = { each,intersection, sortBy, orderBy, filter, find, partial, findIndex, range, map, cloneDeep, keyBy, throttle, every, get };
+window._ = { each, intersection, sortBy, orderBy, filter, find, partial, findIndex, range, map, cloneDeep, keyBy, throttle, every, get };
 
 window.React = require('react');
 window.ReactDOM = require('react-dom');
@@ -64,8 +59,8 @@ window.Link = require('react-router-dom').Link;
 window.NavLink = require('react-router-dom').NavLink;
 
 if (Project.heap) {
-    window.heap=window.heap||[],heap.load=function(e,t){window.heap.appid=e,window.heap.config=t=t||{};var r=document.createElement("script");r.type="text/javascript",r.async=!0,r.src="https://cdn.heapanalytics.com/js/heap-"+e+".js";var a=document.getElementsByTagName("script")[0];a.parentNode.insertBefore(r,a);for(var n=function(e){return function(){heap.push([e].concat(Array.prototype.slice.call(arguments,0)))}},p=["addEventProperties","addUserProperties","clearEventProperties","identify","resetIdentity","removeEventProperty","setEventProperties","track","unsetEventProperty"],o=0;o<p.length;o++)heap[p[o]]=n(p[o])};
-    heap.load(Project.heap)
+    window.heap = window.heap || [], heap.load = function (e, t) { window.heap.appid = e, window.heap.config = t = t || {}; const r = document.createElement('script'); r.type = 'text/javascript', r.async = !0, r.src = `https://cdn.heapanalytics.com/js/heap-${e}.js`; const a = document.getElementsByTagName('script')[0]; a.parentNode.insertBefore(r, a); for (let n = function (e) { return function () { heap.push([e].concat(Array.prototype.slice.call(arguments, 0))); }; }, p = ['addEventProperties', 'addUserProperties', 'clearEventProperties', 'identify', 'resetIdentity', 'removeEventProperty', 'setEventProperties', 'track', 'unsetEventProperty'], o = 0; o<p.length; o++)heap[p[o]] = n(p[o]); };
+    heap.load(Project.heap);
 }
 // Analytics
 if (Project.ga) {
@@ -107,6 +102,6 @@ if (typeof SENTRY_RELEASE_VERSION !== 'undefined' && Project.sentry && typeof Se
     });
 }
 
-if (projectOverrides.delighted) {
-    !(function (e, t, r, n) { if (!e[n]) { for (var a = e[n] = [], i = ['survey', 'reset', 'config', 'init', 'set', 'get', 'event', 'identify', 'track', 'page', 'screen', 'group', 'alias'], s = 0; s < i.length; s++) { const c = i[s]; a[c] = a[c] || (function (e) { return function () { const t = Array.prototype.slice.call(arguments); a.push([e, t]); }; }(c)); }a.SNIPPET_VERSION = '1.0.1'; const o = t.createElement('script'); o.type = 'text/javascript', o.async = !0, o.src = `https://d2yyd1h5u9mauk.cloudfront.net/integrations/web/v1/library/${r}/${n}.js`; const p = t.getElementsByTagName('script')[0]; p.parentNode.insertBefore(o, p); } }(window, document, projectOverrides.delighted, 'delighted'));
+if (Project.delighted) {
+    !(function (e, t, r, n) { if (!e[n]) { for (var a = e[n] = [], i = ['survey', 'reset', 'config', 'init', 'set', 'get', 'event', 'identify', 'track', 'page', 'screen', 'group', 'alias'], s = 0; s < i.length; s++) { const c = i[s]; a[c] = a[c] || (function (e) { return function () { const t = Array.prototype.slice.call(arguments); a.push([e, t]); }; }(c)); }a.SNIPPET_VERSION = '1.0.1'; const o = t.createElement('script'); o.type = 'text/javascript', o.async = !0, o.src = `https://d2yyd1h5u9mauk.cloudfront.net/integrations/web/v1/library/${r}/${n}.js`; const p = t.getElementsByTagName('script')[0]; p.parentNode.insertBefore(o, p); } }(window, document, Project.delighted, 'delighted'));
 }

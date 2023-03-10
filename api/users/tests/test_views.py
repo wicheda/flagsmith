@@ -1,16 +1,16 @@
 import json
-from unittest import mock
 from unittest.case import TestCase
 
 import pytest
 from dateutil.relativedelta import relativedelta
+from django.contrib.auth import login
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
 from organisations.invites.models import Invite, InviteLink
-from organisations.models import Organisation, OrganisationRole, Subscription
+from organisations.models import Organisation, OrganisationRole
 from users.models import FFAdminUser, UserPermissionGroup
 from util.tests import Helper
 
@@ -131,32 +131,7 @@ class UserTestCase(TestCase):
         self.client.post(url)
 
         # Then
-        assert self.user.is_admin(self.organisation)
-
-    @mock.patch("organisations.invites.views.Thread")
-    def test_join_organisation_alerts_admin_users_if_exceeds_plan_limit(
-        self, MockThread
-    ):
-        # Given
-        Subscription.objects.create(organisation=self.organisation, max_seats=1)
-        invite = Invite.objects.create(
-            email=self.user.email, organisation=self.organisation
-        )
-        url = reverse("api-v1:users:user-join-organisation", args=[invite.hash])
-
-        existing_org_user = FFAdminUser.objects.create(
-            email="existing_org_user@example.com"
-        )
-        existing_org_user.add_organisation(self.organisation, OrganisationRole.USER)
-
-        # When
-        self.client.post(url)
-
-        # Then
-        MockThread.assert_called_with(
-            target=FFAdminUser.send_organisation_over_limit_alert,
-            args=[self.organisation],
-        )
+        assert self.user.is_organisation_admin(self.organisation)
 
     def test_admin_can_update_role_for_a_user_in_organisation(self):
         # Given
@@ -213,6 +188,27 @@ class UserTestCase(TestCase):
 
         # Then
         assert res.status_code == status.HTTP_200_OK
+
+    def test_org_user_can_exclude_themself_when_getting_users_in_organisation(self):
+        # Given
+        self.user.add_organisation(self.organisation, OrganisationRole.USER)
+
+        organisation_user = FFAdminUser.objects.create(email="org_user@org.com")
+        organisation_user.add_organisation(self.organisation)
+        base_url = reverse(
+            "api-v1:organisations:organisation-users-list", args=[self.organisation.pk]
+        )
+        url = f"{base_url}?exclude_current=true"
+
+        # When
+        res = self.client.get(url)
+
+        # Then
+        assert res.status_code == status.HTTP_200_OK
+
+        response_json = res.json()
+        assert len(response_json) == 1
+        assert response_json[0]["id"] == organisation_user.id
 
 
 @pytest.mark.django_db
@@ -399,3 +395,63 @@ class UserPermissionGroupViewSetTestCase(TestCase):
         assert response.status_code == status.HTTP_200_OK
         # and admin user is still in the group
         assert self.admin in group.users.all()
+
+
+def test_user_permission_group_can_update_is_default(
+    admin_client, organisation, user_permission_group
+):
+    # Given
+    args = [organisation.id, user_permission_group.id]
+    url = reverse("api-v1:organisations:organisation-groups-detail", args=args)
+
+    data = {"is_default": True, "name": user_permission_group.name}
+
+    # When
+    response = admin_client.put(url, data=data)
+
+    # Then
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["is_default"] is True
+
+    # and
+    user_permission_group.refresh_from_db()
+    assert user_permission_group.is_default is True
+
+
+def test_user_permission_group_can_update_external_id(
+    admin_client, organisation, user_permission_group
+):
+    # Given
+    args = [organisation.id, user_permission_group.id]
+    url = reverse("api-v1:organisations:organisation-groups-detail", args=args)
+    external_id = "some_external_id"
+
+    data = {"external_id": external_id, "name": user_permission_group.name}
+
+    # When
+    response = admin_client.put(url, data=data)
+
+    # Then
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["external_id"] == external_id
+
+
+def test_users_in_organisation_have_last_login(
+    admin_client, organisation, rf, mocker, admin_user
+):
+    # Given
+    req = rf.get("/")
+    req.session = mocker.MagicMock()
+
+    # let's log the user in to generate `last_login`
+    login(req, admin_user, backend="django.contrib.auth.backends.ModelBackend")
+    url = reverse(
+        "api-v1:organisations:organisation-users-list", args=[organisation.id]
+    )
+
+    # When
+    res = admin_client.get(url)
+
+    # Then
+    assert res.json()[0]["last_login"] is not None
+    assert res.status_code == status.HTTP_200_OK

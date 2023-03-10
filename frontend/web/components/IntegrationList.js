@@ -1,13 +1,11 @@
 
 import React, { Component } from 'react';
-import _data from '../../common/data/base/_data';
-import ProjectStore from '../../common/stores/project-store';
-
+import _data from 'common/data/base/_data';
+import ProjectStore from 'common/stores/project-store';
+import ConfigProvider from 'common/providers/ConfigProvider';
 const CreateEditIntegration = require('./modals/CreateEditIntegrationModal');
 
 class Integration extends Component {
-
-
     add =() => {
         this.props.addIntegration(this.props.integration, this.props.id);
     }
@@ -82,15 +80,17 @@ class Integration extends Component {
 
 class IntegrationList extends Component {
     state = {}
+
     static contextTypes = {
         router: propTypes.object.isRequired,
     };
+
     componentDidMount() {
         this.fetch();
     }
 
     fetch = () => {
-        const integrationList = this.props.getValue('integration_data') && JSON.parse(this.props.getValue('integration_data'));
+        const integrationList = Utils.getFlagsmithValue('integration_data') && JSON.parse(Utils.getFlagsmithValue('integration_data'));
         this.setState({ isLoading: true });
         Promise.all(this.props.integrations.map((key) => {
             const integration = integrationList[key];
@@ -120,19 +120,23 @@ class IntegrationList extends Component {
         });
         const params = Utils.fromParam();
         if (params && params.configure) {
-            const integrationList = this.props.getValue('integration_data') && JSON.parse(this.props.getValue('integration_data'));
+            const integrationList = Utils.getFlagsmithValue('integration_data') && JSON.parse(Utils.getFlagsmithValue('integration_data'));
 
             if (integrationList && integrationList[params.configure]) {
-                setTimeout(()=>{
-                    this.addIntegration(integrationList[params.configure], params.configure)
+                setTimeout(() => {
+                    this.addIntegration(integrationList[params.configure], params.configure);
                     this.context.router.history.replace(document.location.pathname);
-                },500)
+                }, 500);
             }
         }
     }
 
     removeIntegration =(integration, id) => {
-        openConfirm('Confirm remove integration', `This will remove your integration from the ${integration.flagsmithEnvironment}` ? 'environment' : 'project' + ', it will no longer recieve data. Are you sure?', () => {
+        const env = integration.flagsmithEnvironment ? ProjectStore.getEnvironment(integration.flagsmithEnvironment) : '';
+        const name = env && env.name;
+        openConfirm('Confirm remove integration', <span>
+            This will remove your integration from the {integration.flagsmithEnvironment ? 'environment ' : 'project'}{name ? <strong>{name}</strong> : ''}, it will no longer receive data. Are you sure?
+        </span>, () => {
             if (integration.flagsmithEnvironment) {
                 _data.delete(`${Project.api}environments/${integration.flagsmithEnvironment}/integrations/${id}/${integration.id}/`)
                     .then(this.fetch).catch(this.onError);
@@ -144,12 +148,12 @@ class IntegrationList extends Component {
     }
 
     addIntegration =(integration, id) => {
-        const params = Utils.fromParam()
+        const params = Utils.fromParam();
         openModal(`${integration.title} Integration`, <CreateEditIntegration
           id={id} integration={integration}
-          data={params.environment?{
-              flagsmithEnvironment:params.environment
-          }:null}
+          data={params.environment ? {
+              flagsmithEnvironment: params.environment,
+          } : null}
           projectId={this.props.projectId} onComplete={this.fetch}
         />);
     }
@@ -163,7 +167,7 @@ class IntegrationList extends Component {
     }
 
     render() {
-        const integrationList = this.props.getValue('integration_data') && JSON.parse(this.props.getValue('integration_data'));
+        const integrationList = Utils.getFlagsmithValue('integration_data') && JSON.parse(Utils.getFlagsmithValue('integration_data'));
         return (
             <div>
                 <div>

@@ -1,19 +1,13 @@
-module.exports = (envId, { LIB_NAME, FEATURE_NAME, USER_ID, FEATURE_FUNCTION, FEATURE_NAME_ALT, FEATURE_NAME_ALT_VALUE, NPM_CLIENT }, userId) => `import ${LIB_NAME} from "${NPM_CLIENT}"; // Add this line if you're using ${LIB_NAME} via npm
+module.exports = (envId, { FEATURE_NAME, FEATURE_NAME_ALT }, userId) => `const Flagsmith = require('flagsmith-nodejs');
 
-${LIB_NAME}.init({
-    environmentID:"${envId}"
-});
+const flagsmith = new Flagsmith(
+    environmentKey: '${envId}'
+);
 
-// This will create a user in the dashboard if they don't already exist
-${LIB_NAME}.hasFeature("${FEATURE_NAME}", "${userId || USER_ID}")
-    .then((featureEnabled) => {
-        if (featureEnabled) {
-            // Show my awesome cool new feature to the world
-        }
-    });
+// Identify the user
+const flags = await flagsmith.getIdentityFlags('${userId}', traitList);
 
-${LIB_NAME}.getValue("${FEATURE_NAME_ALT}", "${userId || USER_ID}")
-    .then((value) => {
-        // Show a value to the world
-    });
+// get the state / value of the user's flags 
+var isEnabled = flags.isFeatureEnabled('${FEATURE_NAME}');
+var featureValue = flags.getFeatureValue('${FEATURE_NAME_ALT}');
 `;

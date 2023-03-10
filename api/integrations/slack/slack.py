@@ -3,9 +3,12 @@ from typing import List
 
 from django.conf import settings
 from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
 from slack_sdk.http_retry.builtin_handlers import RateLimitErrorRetryHandler
 
 from integrations.common.wrapper import AbstractBaseEventIntegrationWrapper
+
+from .exceptions import SlackChannelJoinError
 
 
 @dataclass
@@ -34,8 +37,11 @@ class SlackWrapper(AbstractBaseEventIntegrationWrapper):
         )
         return oauth_response.get("access_token")
 
-    def join_channel(self) -> None:
-        self._client.conversations_join(channel=self.channel_id)
+    def join_channel(self):
+        try:
+            self._client.conversations_join(channel=self.channel_id)
+        except SlackApiError as e:
+            raise SlackChannelJoinError(e.response.get("error")) from e
 
     def get_channels_data(self, **kwargs) -> ChannelsDataResponse:
         """
@@ -59,10 +65,20 @@ class SlackWrapper(AbstractBaseEventIntegrationWrapper):
     @staticmethod
     def generate_event_data(log: str, email: str, environment_name: str) -> dict:
         return {
-            "text": f"{log} by user {email}",
-            "title": "Flagsmith Feature Flag Event",
-            "tags": [f"env:{environment_name}"],
+            "blocks": [
+                {"type": "section", "text": {"type": "plain_text", "text": log}},
+                {
+                    "type": "section",
+                    "fields": [
+                        {
+                            "type": "mrkdwn",
+                            "text": f"*Environment:*\n{environment_name}",
+                        },
+                        {"type": "mrkdwn", "text": f"*User:*\n{email}"},
+                    ],
+                },
+            ]
         }
 
     def _track_event(self, event: dict) -> None:
-        self._client.chat_postMessage(channel=self.channel_id, text=event["text"])
+        self._client.chat_postMessage(channel=self.channel_id, blocks=event["blocks"])

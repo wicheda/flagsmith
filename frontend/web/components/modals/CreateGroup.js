@@ -1,8 +1,7 @@
 import React, { Component } from 'react';
+import UserGroupsProvider from 'common/providers/UserGroupsProvider';
+import ConfigProvider from 'common/providers/ConfigProvider';
 import Switch from '../Switch';
-import UserGroupsProvider from '../../../common/providers/UserGroupsProvider';
-import data from '../../../common/data/base/_data';
-
 const CreateGroup = class extends Component {
     static displayName = 'CreateGroup'
 
@@ -15,6 +14,8 @@ const CreateGroup = class extends Component {
         this.state = {
             name: props.group ? props.group.name : '',
             users: props.group ? props.group.users : [],
+            is_default: props.group ? props.group.is_default : false,
+            external_id: props.group ? props.group.external_id : undefined,
         };
     }
 
@@ -38,25 +39,25 @@ const CreateGroup = class extends Component {
         }
     }
 
-    getUsersToRemove = (users) => {
-        return _.filter(users, ({id})=>{
-            return !_.find(this.state.users, {id})
-        })
-    }
+    getUsersToRemove = users => _.filter(users, ({ id }) => !_.find(this.state.users, { id }))
 
     save = (allUsers) => {
-        const { name, users } = this.state;
+        const { name, users, is_default, external_id } = this.state;
         if (this.props.group) {
             AppActions.updateGroup(this.props.orgId, {
                 id: this.props.group.id,
                 name,
+                is_default: !!this.state.is_default,
                 users,
+                external_id,
                 usersToRemove: this.getUsersToRemove(allUsers),
             });
         } else {
             AppActions.createGroup(this.props.orgId, {
                 name,
                 users,
+                is_default,
+                external_id,
                 usersToRemove: this.getUsersToRemove(allUsers),
             });
         }
@@ -69,8 +70,10 @@ const CreateGroup = class extends Component {
     }
 
     render() {
-        const { name } = this.state;
+        const { name, external_id } = this.state;
         const isEdit = !!this.props.group;
+        const isAdmin = AccountStore.isAdmin();
+        const yourEmail = AccountStore.model.email;
         return (
 
             <OrganisationProvider>
@@ -78,14 +81,13 @@ const CreateGroup = class extends Component {
                     <UserGroupsProvider onSave={this.close}>
                         {({ isSaving }) => (
                             <form
-                              id="create-feature-modal"
                               onSubmit={(e) => {
                                   Utils.preventDefault(e);
                                   this.save(users);
                               }}
                             >
                                 <InputGroup
-                                  title="Group name"
+                                  title="Group name*"
                                   ref={e => this.input = e}
                                   data-test="groupName"
                                   inputProps={{
@@ -99,12 +101,43 @@ const CreateGroup = class extends Component {
                                   name="Name*"
                                   placeholder="E.g. Developers"
                                 />
+                                    <InputGroup
+                                      title="External ID"
+                                      ref={e => this.input = e}
+                                      data-test="groupName"
+                                      inputProps={{
+                                          className: 'full-width',
+                                          name: 'groupName',
+                                      }}
+                                      value={external_id}
+                                      onChange={e => this.setState({ external_id: Utils.safeParseEventValue(e) })}
+                                      isValid={name && name.length}
+                                      type="text"
+                                      name="Name*"
+                                      placeholder="Add an optional external reference ID"
+                                    />
+
+                                    <InputGroup
+                                      title="Add new users by default"
+                                      tooltipPlace="top"
+                                      tooltip="New users that sign up to your organisation will be automatically added to this group with USER permissions"
+                                      ref={e => this.input = e}
+                                      data-test="groupName"
+                                      component={<Switch onChange={e => this.setState({ is_default: Utils.safeParseEventValue(e) })} checked={!!this.state.is_default}/>}
+                                      inputProps={{
+                                          className: 'full-width',
+                                          name: 'groupName',
+                                      }}
+                                      value={name}
+                                      isValid={name && name.length}
+                                      type="text"
+                                    />
                                 <div className="mb-5">
                                     <PanelSearch
                                       id="org-members-list"
                                       title="Members"
                                       className="mt-5 no-pad"
-                                      items={users}
+                                      items={_.sortBy(users, "first_name")}
                                       filterRow={(item, search) => {
                                           const strToSearch = `${item.first_name} ${item.last_name} ${item.id}`;
                                           return strToSearch.toLowerCase().indexOf(search.toLowerCase()) !== -1;
@@ -119,7 +152,7 @@ const CreateGroup = class extends Component {
                                                       {email}
                                                   </div>
                                               </div>
-                                              <Switch onChange={() => this.toggleUser(id)} checked={!!_.find(this.state.users, { id })}/>
+                                                  <Switch disabled={!(isAdmin || email !== yourEmail)} onChange={() => this.toggleUser(id)} checked={!!_.find(this.state.users, { id })}/>
                                           </Row>
                                       )}
                                     />

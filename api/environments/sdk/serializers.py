@@ -1,3 +1,6 @@
+import typing
+from collections import defaultdict
+
 from core.constants import BOOLEAN, FLOAT, INTEGER, STRING
 from rest_framework import serializers
 
@@ -9,6 +12,7 @@ from environments.identities.traits.fields import TraitValueField
 from environments.identities.traits.models import Trait
 from environments.identities.traits.serializers import TraitSerializerBasic
 from features.serializers import FeatureStateSerializerFull
+from integrations.integration import identify_integrations
 from segments.serializers import SegmentSerializerBasic
 
 
@@ -41,6 +45,14 @@ class SDKCreateUpdateTraitSerializer(serializers.ModelSerializer):
             identity=identity, trait_key=trait_key, defaults=defaults
         )[0]
 
+    def validate(self, attrs):
+        request = self.context["request"]
+        if not request.environment.trait_persistence_allowed(request):
+            raise serializers.ValidationError(
+                "Setting traits not allowed with client key."
+            )
+        return attrs
+
     def _get_identity(self, identifier):
         return Identity.objects.get_or_create(
             identifier=identifier, environment=self.context["environment"]
@@ -49,6 +61,45 @@ class SDKCreateUpdateTraitSerializer(serializers.ModelSerializer):
 
 class SDKBulkCreateUpdateTraitSerializer(SDKCreateUpdateTraitSerializer):
     trait_value = TraitValueField(allow_null=True)
+
+    class Meta(SDKCreateUpdateTraitSerializer.Meta):
+        class BulkTraitListSerializer(serializers.ListSerializer):
+            """
+            Create a custom ListSerializer that is only used by this serializer to
+            optimise the way in which we create, update and delete traits in the db
+            """
+
+            def update(self, instance, validated_data):
+                return self.save()
+
+            def save(self, **kwargs):
+                identity_trait_items = self._build_identifier_trait_items_dictionary()
+                modified_traits = []
+                for identifier, trait_data_items in identity_trait_items.items():
+                    identity, _ = Identity.objects.get_or_create(
+                        identifier=identifier,
+                        environment=self.context["request"].environment,
+                    )
+                    modified_traits.extend(identity.update_traits(trait_data_items))
+                return modified_traits
+
+            def _build_identifier_trait_items_dictionary(
+                self,
+            ) -> typing.Dict[str, typing.List[typing.Dict]]:
+                """
+                build a dictionary of the form
+                {"identifier": [{"trait_key": "key", "trait_value": "value"}, ...]}
+                """
+                identity_trait_items = defaultdict(list)
+                for item in self.validated_data:
+                    # item will be in the format:
+                    # {"identity": {"identifier": "foo"}, "trait_key": "foo", "trait_value": "bar"}
+                    identity_trait_items[item["identity"]["identifier"]].append(
+                        dict((k, v) for k, v in item.items() if k != "identity")
+                    )
+                return identity_trait_items
+
+        list_serializer_class = BulkTraitListSerializer
 
 
 class IdentitySerializerWithTraitsAndSegments(serializers.Serializer):
@@ -68,40 +119,42 @@ class IdentifyWithTraitsSerializer(serializers.Serializer):
     traits = TraitSerializerBasic(required=False, many=True)
     flags = FeatureStateSerializerFull(read_only=True, many=True)
 
-    def create(self, validated_data):
+    def save(self, **kwargs):
         """
         Create the identity with the associated traits
         (optionally store traits if flag set on org)
         """
         environment = self.context["environment"]
         identity, created = Identity.objects.get_or_create(
-            identifier=validated_data["identifier"], environment=environment
+            identifier=self.validated_data["identifier"], environment=environment
         )
+
+        trait_data_items = self.validated_data.get("traits", [])
 
         if not created and environment.project.organisation.persist_trait_data:
             # if this is an update and we're persisting traits, then we need to
             # partially update any traits and return the full list
-            return self.update(instance=identity, validated_data=validated_data)
+            trait_models = identity.update_traits(trait_data_items)
+        else:
+            # generate traits for the identity and store them if configured to do so
+            trait_models = identity.generate_traits(
+                trait_data_items,
+                persist=environment.project.organisation.persist_trait_data,
+            )
 
-        # generate traits for the identity and store them if configured to do so
-        trait_models = identity.generate_traits(
-            validated_data.get("traits", []),
-            persist=environment.project.organisation.persist_trait_data,
-        )
+        all_feature_states = identity.get_all_feature_states(traits=trait_models)
+        identify_integrations(identity, all_feature_states, trait_models)
 
         return {
             "identity": identity,
             "traits": trait_models,
-            "flags": identity.get_all_feature_states(traits=trait_models),
+            "flags": all_feature_states,
         }
 
-    def update(self, instance, validated_data):
-        """partially update any traits and return the full list of traits and flags"""
-        trait_data_items = validated_data.get("traits", [])
-        updated_traits = instance.update_traits(trait_data_items)
-
-        return {
-            "identity": instance,
-            "traits": updated_traits,
-            "flags": instance.get_all_feature_states(traits=updated_traits),
-        }
+    def validate_traits(self, traits: typing.List[dict] = None):
+        request = self.context["request"]
+        if traits and not request.environment.trait_persistence_allowed(request):
+            raise serializers.ValidationError(
+                "Setting traits not allowed with client key."
+            )
+        return traits

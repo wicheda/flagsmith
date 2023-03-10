@@ -6,6 +6,7 @@ from rest_framework.authtoken.models import Token
 from rest_framework.exceptions import PermissionDenied
 
 from organisations.invites.models import Invite
+from users.models import SignUpType
 
 from ..constants import USER_REGISTRATION_WITHOUT_INVITE_ERROR_MESSAGE
 from .github import GithubUser
@@ -20,19 +21,38 @@ class OAuthLoginSerializer(serializers.Serializer):
         required=True,
         help_text="Code or access token returned from the FE interaction with the third party login provider.",
     )
+    sign_up_type = serializers.ChoiceField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+        choices=SignUpType.choices,
+        help_text="Provide information about how the user signed up (i.e. via invite or not)",
+        write_only=True,
+    )
 
     class Meta:
         abstract = True
 
     def create(self, validated_data):
-        user = self._get_user()
+        user_info = self.get_user_info()
+        if settings.AUTH_CONTROLLER_INSTALLED:
+            from auth_controller.controller import (
+                is_authentication_method_valid,
+            )
+
+            is_authentication_method_valid(
+                self.context.get("request"),
+                email=user_info.get("email"),
+                raise_exception=True,
+            )
+
+        user = self._get_user(user_info)
         user_logged_in.send(
             sender=UserModel, request=self.context.get("request"), user=user
         )
         return Token.objects.get_or_create(user=user)[0]
 
-    def _get_user(self):
-        user_data = self.get_user_info()
+    def _get_user(self, user_data: dict):
         email = user_data.get("email")
         existing_user = UserModel.objects.filter(email=email).first()
 
@@ -43,7 +63,9 @@ class OAuthLoginSerializer(serializers.Serializer):
             ):
                 raise PermissionDenied(USER_REGISTRATION_WITHOUT_INVITE_ERROR_MESSAGE)
 
-            return UserModel.objects.create(**user_data)
+            return UserModel.objects.create(
+                **user_data, sign_up_type=self.validated_data.get("sign_up_type")
+            )
 
         return existing_user
 

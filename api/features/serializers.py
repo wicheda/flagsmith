@@ -1,21 +1,20 @@
-from rest_framework import serializers
+import typing
 
-from audit.models import (
-    FEATURE_CREATED_MESSAGE,
-    FEATURE_STATE_UPDATED_MESSAGE,
-    FEATURE_UPDATED_MESSAGE,
-    IDENTITY_FEATURE_STATE_UPDATED_MESSAGE,
-    AuditLog,
-    RelatedObjectType,
-)
+import django.core.exceptions
+from drf_writable_nested import WritableNestedModelSerializer
+from rest_framework import serializers
+from rest_framework.exceptions import PermissionDenied
+
 from environments.identities.models import Identity
 from users.serializers import UserIdsSerializer, UserListSerializer
-from util.drf_writable_nested.serializers import WritableNestedModelSerializer
+from util.drf_writable_nested.serializers import (
+    DeleteBeforeUpdateWritableNestedModelSerializer,
+)
 
 from .models import Feature, FeatureState, FeatureStateValue
 from .multivariate.serializers import (
-    MultivariateFeatureOptionSerializer,
     MultivariateFeatureStateValueSerializer,
+    NestedMultivariateFeatureOptionSerializer,
 )
 
 
@@ -47,11 +46,44 @@ class ProjectFeatureSerializer(serializers.ModelSerializer):
         writeonly_fields = ("initial_value", "default_enabled")
 
 
-class ListCreateFeatureSerializer(WritableNestedModelSerializer):
-    multivariate_options = MultivariateFeatureOptionSerializer(
+class FeatureQuerySerializer(serializers.Serializer):
+    search = serializers.CharField(required=False)
+    sort_field = serializers.ChoiceField(
+        choices=("created_date", "name"), default="created_date"
+    )
+    sort_direction = serializers.ChoiceField(choices=("ASC", "DESC"), default="ASC")
+
+    tags = serializers.CharField(
+        required=False, help_text="Comma separated list of tag ids to filter on (AND)"
+    )
+    is_archived = serializers.BooleanField(required=False)
+    environment = serializers.IntegerField(
+        required=False,
+        help_text="Integer ID of the environment to view features in the context of.",
+    )
+
+    def validate_tags(self, tags):
+        try:
+            return [int(tag_id.strip()) for tag_id in tags.split(",")]
+        except ValueError:
+            raise serializers.ValidationError("Tag IDs must be integers.")
+
+
+class ListCreateFeatureSerializer(DeleteBeforeUpdateWritableNestedModelSerializer):
+    multivariate_options = NestedMultivariateFeatureOptionSerializer(
         many=True, required=False
     )
     owners = UserListSerializer(many=True, read_only=True)
+
+    num_segment_overrides = serializers.SerializerMethodField(
+        help_text="Number of segment overrides that exist for the given feature "
+        "in the environment provided by the `environment` query parameter."
+    )
+    num_identity_overrides = serializers.SerializerMethodField(
+        help_text="Number of identity overrides that exist for the given feature "
+        "in the environment provided by the `environment` query parameter. "
+        "Note: will return null for Edge enabled projects."
+    )
 
     class Meta:
         model = Feature
@@ -67,8 +99,12 @@ class ListCreateFeatureSerializer(WritableNestedModelSerializer):
             "multivariate_options",
             "is_archived",
             "owners",
+            "uuid",
+            "project",
+            "num_segment_overrides",
+            "num_identity_overrides",
         )
-        read_only_fields = ("feature_segments", "created_date")
+        read_only_fields = ("feature_segments", "created_date", "uuid", "project")
 
     def to_internal_value(self, data):
         if data.get("initial_value") and not isinstance(data["initial_value"], str):
@@ -78,49 +114,46 @@ class ListCreateFeatureSerializer(WritableNestedModelSerializer):
     def create(self, validated_data):
         # Add the default(User creating the feature) owner of the feature
         # NOTE: pop the user before passing the data to create
-        user = validated_data.pop("user")
+        user = validated_data.pop("user", None)
         instance = super(ListCreateFeatureSerializer, self).create(validated_data)
-        instance.owners.add(user)
-        self._create_audit_log(instance, True)
+        if user and not user.is_anonymous:
+            instance.owners.add(user)
         return instance
 
-    def update(self, instance, validated_data):
-        updated_instance = super(ListCreateFeatureSerializer, self).update(
-            instance, validated_data
-        )
-        self._create_audit_log(updated_instance, False)
-        return updated_instance
+    def validate_multivariate_options(self, multivariate_options):
+        if multivariate_options:
+            user = self.context["request"].user
+            project = self.context.get("project")
 
-    def _create_audit_log(self, instance, created):
-        message = (
-            FEATURE_CREATED_MESSAGE % instance.name
-            if created
-            else FEATURE_UPDATED_MESSAGE % instance.name
-        )
-        request = self.context.get("request")
-        AuditLog.objects.create(
-            author=getattr(request, "user", None),
-            related_object_id=instance.id,
-            related_object_type=RelatedObjectType.FEATURE.name,
-            project=instance.project,
-            log=message,
-        )
+            if user.is_authenticated and not (
+                project and user.is_project_admin(project)
+            ):
+                raise PermissionDenied(
+                    "User must be project admin to modify / create MV options."
+                )
+            total_percentage_allocation = sum(
+                mv_option.get("default_percentage_allocation", 100)
+                for mv_option in multivariate_options
+            )
+            if total_percentage_allocation > 100:
+                raise serializers.ValidationError("Invalid percentage allocation")
+        return multivariate_options
 
-    def validate_multivariate_options(self, mv_options):
-        total_percentage_allocation = sum(
-            mv_option.get("default_percentage_allocation", 100)
-            for mv_option in mv_options
-        )
-        if total_percentage_allocation > 100:
-            raise serializers.ValidationError("Invalid percentage allocation")
-        return mv_options
-
-    def validate(self, attrs):
+    def validate_name(self, name: str):
         view = self.context["view"]
-        project_id = str(view.kwargs.get("project_pk"))
-        if not project_id.isdigit():
-            raise serializers.ValidationError("Invalid project ID.")
-        unique_filters = {"project__id": project_id, "name__iexact": attrs["name"]}
+
+        project = self.context["project"]
+        feature_name_regex = project.feature_name_regex
+
+        if not project.is_feature_name_valid(name):
+            raise serializers.ValidationError(
+                f"Feature name must match regex: {feature_name_regex}"
+            )
+
+        unique_filters = {
+            "project__id": view.kwargs.get("project_pk"),
+            "name__iexact": name,
+        }
         existing_feature_queryset = Feature.objects.filter(**unique_filters)
         if self.instance:
             existing_feature_queryset = existing_feature_queryset.exclude(
@@ -134,6 +167,14 @@ class ListCreateFeatureSerializer(WritableNestedModelSerializer):
                 "insensitive."
             )
 
+        return name
+
+    def validate(self, attrs):
+        view = self.context["view"]
+        project_id = str(view.kwargs.get("project_pk"))
+        if not project_id.isdigit():
+            raise serializers.ValidationError("Invalid project ID.")
+
         # If tags selected check they from the same Project as Feature Project
         if any(tag.project_id != int(project_id) for tag in attrs.get("tags", [])):
             raise serializers.ValidationError(
@@ -142,14 +183,27 @@ class ListCreateFeatureSerializer(WritableNestedModelSerializer):
 
         return attrs
 
+    def get_num_segment_overrides(self, instance) -> int:
+        try:
+            return self.context["overrides_data"][instance.id].num_segment_overrides
+        except (KeyError, AttributeError):
+            return 0
+
+    def get_num_identity_overrides(self, instance) -> typing.Optional[int]:
+        try:
+            return self.context["overrides_data"][instance.id].num_identity_overrides
+        except (KeyError, AttributeError):
+            return None
+
 
 class UpdateFeatureSerializer(ListCreateFeatureSerializer):
-    """prevent users from changing the value of default enabled after creation"""
+    """prevent users from changing certain values after creation"""
 
     class Meta(ListCreateFeatureSerializer.Meta):
         read_only_fields = ListCreateFeatureSerializer.Meta.read_only_fields + (
             "default_enabled",
             "initial_value",
+            "name",
         )
 
 
@@ -174,7 +228,15 @@ class FeatureStateSerializerFull(serializers.ModelSerializer):
 
     class Meta:
         model = FeatureState
-        fields = "__all__"
+        fields = (
+            "id",
+            "feature",
+            "feature_state_value",
+            "environment",
+            "identity",
+            "feature_segment",
+            "enabled",
+        )
 
     def get_feature_state_value(self, obj):
         return obj.get_feature_state_value(identity=self.context.get("identity"))
@@ -185,33 +247,38 @@ class FeatureStateSerializerBasic(WritableNestedModelSerializer):
     multivariate_feature_state_values = MultivariateFeatureStateValueSerializer(
         many=True, required=False
     )
+    identifier = serializers.CharField(
+        required=False,
+        help_text="Can be passed as an alternative to `identity`",
+    )
 
     class Meta:
         model = FeatureState
         fields = "__all__"
+        read_only_fields = ("version", "created_at", "updated_at", "status")
 
     def get_feature_state_value(self, obj):
         return obj.get_feature_state_value(identity=self.context.get("identity"))
 
-    def create(self, validated_data):
-        instance = super(FeatureStateSerializerBasic, self).create(validated_data)
-        self._create_audit_log(instance=instance)
-        return instance
-
-    def update(self, instance, validated_data):
-        updated_instance = super(FeatureStateSerializerBasic, self).update(
-            instance, validated_data
-        )
-        self._create_audit_log(updated_instance)
-        return updated_instance
-
-    def _create_audit_log(self, instance):
-        create_feature_state_audit_log(instance, self.context.get("request"))
+    def save(self, **kwargs):
+        try:
+            return super().save(**kwargs)
+        except django.core.exceptions.ValidationError as e:
+            raise serializers.ValidationError(e.message)
 
     def validate(self, attrs):
         environment = attrs.get("environment")
         identity = attrs.get("identity")
         feature_segment = attrs.get("feature_segment")
+        identifier = attrs.pop("identifier", None)
+        if identifier:
+            try:
+                identity = Identity.objects.get(
+                    identifier=identifier, environment=environment
+                )
+                attrs["identity"] = identity
+            except Identity.DoesNotExist:
+                raise serializers.ValidationError("Invalid identifier")
 
         if identity and not identity.environment == environment:
             raise serializers.ValidationError("Identity does not exist in environment.")
@@ -221,35 +288,13 @@ class FeatureStateSerializerBasic(WritableNestedModelSerializer):
                 "Feature Segment does not belong to environment."
             )
 
-        # validate uniqueness
-        # Note: we get the attribute from the instance if it's not in attrs to handle
-        # the case of a partial update
-        environment = environment or getattr(self.instance, "environment", None)
-        identity = identity or getattr(self.instance, "identity", None)
-        feature_segment = attrs.get("feature_segment") or getattr(
-            self.instance, "feature_segment", None
-        )
-        feature = attrs.get("feature") or getattr(self.instance, "feature", None)
-        queryset = FeatureState.objects.filter(
-            environment=environment,
-            feature=feature,
-            identity=identity,
-            feature_segment=feature_segment,
-        ).exclude(pk=getattr(self.instance, "pk", None))
-
-        if queryset.exists():
-            raise serializers.ValidationError("Feature state already exists.")
-
-        self._validate_multivariate_percentage_values()
-
-        return attrs
-
-    def _validate_multivariate_percentage_values(self):
-        mv_values = self.initial_data.get("multivariate_feature_state_values", [])
+        mv_values = attrs.get("multivariate_feature_state_values", [])
         if sum([v["percentage_allocation"] for v in mv_values]) > 100:
             raise serializers.ValidationError(
                 "Multivariate percentage values exceed 100%."
             )
+
+        return attrs
 
 
 class FeatureStateSerializerWithIdentity(FeatureStateSerializerBasic):
@@ -266,36 +311,6 @@ class FeatureStateSerializerCreate(serializers.ModelSerializer):
         model = FeatureState
         fields = ("feature", "enabled")
 
-    def save(self, **kwargs):
-        instance = super(FeatureStateSerializerCreate, self).save(**kwargs)
-        self._create_audit_log(instance=instance)
-        return instance
-
-    def _create_audit_log(self, instance):
-        create_feature_state_audit_log(instance, self.context.get("request"))
-
-    def validate(self, attrs):
-        return super(FeatureStateSerializerCreate, self).validate(attrs)
-
-
-def create_feature_state_audit_log(feature_state, request):
-    if feature_state.identity:
-        message = IDENTITY_FEATURE_STATE_UPDATED_MESSAGE % (
-            feature_state.feature.name,
-            feature_state.identity.identifier,
-        )
-    else:
-        message = FEATURE_STATE_UPDATED_MESSAGE % feature_state.feature.name
-
-    AuditLog.objects.create(
-        author=getattr(request, "user", None),
-        related_object_id=feature_state.id,
-        related_object_type=RelatedObjectType.FEATURE_STATE.name,
-        environment=feature_state.environment,
-        project=feature_state.environment.project,
-        log=message,
-    )
-
 
 class FeatureStateValueSerializer(serializers.ModelSerializer):
     class Meta:
@@ -307,9 +322,22 @@ class FeatureInfluxDataSerializer(serializers.Serializer):
     events_list = serializers.ListSerializer(child=serializers.DictField())
 
 
+class FeatureEvaluationDataSerializer(serializers.Serializer):
+    day = serializers.CharField()
+    count = serializers.IntegerField()
+
+
 class GetInfluxDataQuerySerializer(serializers.Serializer):
     period = serializers.CharField(required=False, default="24h")
     environment_id = serializers.CharField(required=True)
+    aggregate_every = serializers.CharField(required=False, default="24h")
+
+
+class GetUsageDataQuerySerializer(serializers.Serializer):
+    period = serializers.IntegerField(
+        required=False, default=30, help_text="number of days"
+    )
+    environment_id = serializers.IntegerField(required=True)
 
 
 class WritableNestedFeatureStateSerializer(FeatureStateSerializerBasic):
@@ -317,3 +345,15 @@ class WritableNestedFeatureStateSerializer(FeatureStateSerializerBasic):
 
     class Meta(FeatureStateSerializerBasic.Meta):
         extra_kwargs = {"environment": {"required": True}}
+
+
+class SegmentAssociatedFeatureStateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FeatureState
+        fields = ("id", "feature", "environment")
+
+
+class SDKFeatureStatesQuerySerializer(serializers.Serializer):
+    feature = serializers.CharField(
+        required=False, help_text="Name of the feature to get the state of"
+    )

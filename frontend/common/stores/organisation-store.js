@@ -1,11 +1,23 @@
+import Constants from 'common/constants';
+
+const Dispatcher = require('../dispatcher/dispatcher');
 const BaseStore = require('./base/_store');
 const data = require('../data/base/_data');
 
 
 const controller = {
 
+    invalidateInviteLink: (link) => {
+        const id = AccountStore.getOrganisation().id;
+        data.delete(`${Project.api}organisations/${id}/invite-links/${link.id}/`).then(() => data.post(`${Project.api}organisations/${id}/invite-links/`, {
+            role: 'ADMIN',
+        })).then(() => data.get(`${Project.api}organisations/${id}/invite-links/`).then((links) => {
+            store.model.inviteLinks = links;
+            store.loaded();
+        }));
+    },
     getOrganisation: (id, force) => {
-        if (id != store.id || force) {
+        if (id !== store.id || force) {
             store.id = id;
             store.loading();
 
@@ -14,47 +26,46 @@ const controller = {
                 data.get(`${Project.api}organisations/${id}/users/`),
             ].concat(AccountStore.getOrganisationRole(id) === 'ADMIN' ? [
                 data.get(`${Project.api}organisations/${id}/invites/`),
+                data.get(`${Project.api}organisations/${id}/get-subscription-metadata/`).catch(() => null),
+
             ] : [])).then((res) => {
                 if (id === store.id) {
                     // eslint-disable-next-line prefer-const
-                    let [projects, users, invites] = res;
+                    let [projects, users, invites, subscriptionMeta] = res;
                     // projects = projects.results;
-                    store.model = { ...store.model, users, invites: invites && invites.results };
+                    store.model = { ...store.model, subscriptionMeta, users, invites: invites && invites.results };
 
-                    if (AccountStore.getOrganisationRole(id) === 'ADMIN' && !E2E && flagsmith.hasFeature('usage_chart')) {
-                        data.get(`${Project.api}organisations/${id}/usage/`).then((usage) => {
-                            store.model.usage = usage && usage.events;
-                            store.loaded();
-                        }).catch(() => {
+                    if (Project.hideInviteLinks) {
+                        store.loaded();
+                    } else {
+                        data.get(`${Project.api}organisations/${id}/invite-links/`).then((links) => {
+                            store.model.inviteLinks = links;
+                            if (!links || !links.length) {
+                                Promise.all([
+                                    data.post(`${Project.api}organisations/${id}/invite-links/`, {
+                                        role: 'ADMIN',
+                                    }),
+                                    data.post(`${Project.api}organisations/${id}/invite-links/`, {
+                                        role: 'USER',
+                                    }),
+                                ]).then(() => {
+                                    data.get(`${Project.api}organisations/${id}/invite-links/`).then((links) => {
+                                        store.model.inviteLinks = links;
+
+                                        store.loaded();
+                                    });
+                                });
+                            } else {
+                                store.loaded();
+                            }
                         });
                     }
-                    data.get(`${Project.api}organisations/${id}/invite-links/`).then((links) => {
-                        store.model.inviteLinks = links;
-                        if (!links || !links.length) {
-                            Promise.all([
-                                data.post(`${Project.api}organisations/${id}/invite-links/`, {
-                                    role: 'ADMIN',
-                                }),
-                                data.post(`${Project.api}organisations/${id}/invite-links/`, {
-                                    role: 'USER',
-                                }),
-                            ]).then(() => {
-                                data.get(`${Project.api}organisations/${id}/invite-links/`).then((links) => {
-                                    store.model.inviteLinks = links;
-
-                                    store.loaded();
-                                });
-                            });
-                        } else {
-                            store.loaded();
-                        }
-                    });
 
                     return Promise.all(projects.map((project, i) => data.get(`${Project.api}environments/?project=${project.id}`)
                         .then((res) => {
                             projects[i].environments = _.sortBy(res.results, 'name');
                         })
-                        .catch((res) => {
+                        .catch(() => {
                             projects[i].environments = [];
                         })))
                         .then(() => {
@@ -71,9 +82,10 @@ const controller = {
             });
         }
     },
+
     createProject: (name) => {
         store.saving();
-        const createSampleUser = (res, envName) => data.post(`${Project.api}environments/${res.api_key}/identities/`, {
+        const createSampleUser = (res, envName, project) => data.post(`${Project.api}environments/${res.api_key}/${Utils.getIdentitiesEndpoint(project)}/`, {
             environment: res.id,
             identifier: `${envName}_user_123456`,
         }).then(() => res);
@@ -85,9 +97,9 @@ const controller = {
             .then((project) => {
                 Promise.all([
                     data.post(`${Project.api}environments/`, { name: 'Development', project: project.id })
-                        .then(res => createSampleUser(res, 'development')),
+                        .then(res => createSampleUser(res, 'development', project)),
                     data.post(`${Project.api}environments/`, { name: 'Production', project: project.id })
-                        .then(res => createSampleUser(res, 'production')),
+                        .then(res => createSampleUser(res, 'production', project)),
                 ]).then((res) => {
                     project.environments = res;
                     store.model.projects = store.model.projects.concat(project);
@@ -104,7 +116,7 @@ const controller = {
         data.put(`${Project.api}organisations/${store.id}/`, { name })
             .then((res) => {
                 const idx = _.findIndex(store.model.organisations, { id: store.organisation.id });
-                if (idx != -1) {
+                if (idx !== -1) {
                     store.model.organisations[idx] = res;
                     store.organisation = res;
                 }
@@ -114,7 +126,7 @@ const controller = {
     deleteProject: (id) => {
         store.saving();
         if (store.model) {
-            store.model.projects = _.filter(store.model.projects, p => p.id != id);
+            store.model.projects = _.filter(store.model.projects, p => p.id !== id);
             store.model.keyedProjects = _.keyBy(store.model.projects, 'id');
         }
         API.trackEvent(Constants.events.REMOVE_PROJECT);
@@ -133,14 +145,13 @@ const controller = {
                     role: invite.role.value,
                 };
             }),
-            frontend_base_url: `${document.location.origin}/invite/`,
+            frontend_base_url: `${document.location.origin}/email-invite/`,
         }).then((res) => {
             store.model.invites = store.model.invites || [];
             store.model.invites = store.model.invites.concat(res);
             store.saved();
             toast('Invite(s) sent successfully');
         }).catch((e) => {
-            console.error('Failed to send invite(s)', e);
             store.saved();
             toast(`Failed to send invite(s). ${e && e.error ? e.error : 'Please try again later'}`);
         });
@@ -176,7 +187,6 @@ const controller = {
                 toast('Invite resent successfully');
             })
             .catch((e) => {
-                console.error('Failed to resend invite', e);
                 toast(`Failed to resend invite. ${e && e.error ? e.error : 'Please try again later'}`);
             });
     },
@@ -191,33 +201,20 @@ const controller = {
                 }
             })
             .catch((e) => {
-                console.error('Failed to update user role', e);
                 toast(`Failed to update this user's role. ${e && e.error ? e.error : 'Please try again later'}`);
             });
     },
-    getInfluxData: (id) => {
-        data.get(`${Project.api}organisations/${id}/influx-data/`)
-            .then((resp) => {
-                API.trackEvent(Constants.events.GET_INFLUX_DATA);
-                store.model.influx_data = resp;
-                store.saved();
-            })
-            .catch((e) => {
-                console.error('Failed to get influx data', e);
-            });
-    },
-
 
 };
 
 
-var store = Object.assign({}, BaseStore, {
+const store = Object.assign({}, BaseStore, {
     id: 'account',
     getProject(id) {
         return store.model && store.model.keyedProjects && store.model.keyedProjects[id];
     },
-    getUsage() {
-        return store.model && store.model.usage;
+    getSubscriptionMeta() {
+        return store.model && store.model.subscriptionMeta;
     },
     getProjects() {
         return store.model && store.model.projects;
@@ -225,9 +222,6 @@ var store = Object.assign({}, BaseStore, {
 
     getUsers: () => store.model && store.model.users,
     getInvites: () => store.model && store.model.invites,
-    getInflux() {
-        return store.model && store.model.influx_data;
-    },
     getInviteLinks() {
         return store.model && store.model.inviteLinks;
     },
@@ -262,8 +256,8 @@ store.dispatcherIndex = Dispatcher.register(store, (payload) => {
         case Actions.UPDATE_USER_ROLE:
             controller.updateUserRole(action.id, action.role);
             break;
-        case Actions.GET_INFLUX_DATA:
-            controller.getInfluxData(action.id);
+        case Actions.INVALIDATE_INVITE_LINK:
+            controller.invalidateInviteLink(action.link);
             break;
         case Actions.LOGOUT:
             store.id = null;

@@ -19,14 +19,37 @@ def test_CustomUserCreateSerializer_converts_email_to_lower_case(db):
 
 
 def test_CustomUserCreateSerializer_does_case_insensitive_lookup_with_email(db):
-
     # Given
     FFAdminUser.objects.create(email="testuser@mail.com")
     serializer = CustomUserCreateSerializer(data=user_dict)
 
     # When
     assert serializer.is_valid() is False
-    assert (
-        serializer.errors["email"][0].title()
-        == "Feature Flag Admin User With This Email Already Exists."
+    assert serializer.errors["detail"][0].title() == "Unable To Create Account"
+
+
+def test_CustomUserCreateSerializer_calls_is_authentication_method_valid_correctly_if_auth_controller_is_installed(
+    db, settings, mocker, rf
+):
+    # Given
+    settings.AUTH_CONTROLLER_INSTALLED = True
+
+    request = rf.post("/v1/auth/login")
+    mocked_auth_controller = mocker.MagicMock()
+    mocker.patch.dict(
+        "sys.modules", {"auth_controller.controller": mocked_auth_controller}
+    )
+
+    # When
+    serializer = CustomUserCreateSerializer(
+        data=user_dict, context={"request": request}
+    )
+
+    serializer.is_valid(raise_exception=True)
+
+    # Then
+    mocked_auth_controller.is_authentication_method_valid.assert_called_with(
+        request,
+        email=user_dict["email"],
+        raise_exception=True,
     )

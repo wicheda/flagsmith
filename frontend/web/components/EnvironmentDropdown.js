@@ -1,4 +1,5 @@
 import React, { Component } from 'react';
+import ConfigProvider from 'common/providers/ConfigProvider';
 
 const EnvironmentSelect = class extends Component {
   static displayName = 'EnvironmentSelect'
@@ -9,8 +10,6 @@ const EnvironmentSelect = class extends Component {
   }
 
   render() {
-      const { hasFeature } = this.props;
-
       return (
           <ProjectProvider id={this.props.projectId}>
               {({ isLoading, project }) => (

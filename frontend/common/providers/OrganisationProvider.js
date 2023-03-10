@@ -1,6 +1,6 @@
 import { Component } from 'react';
-import OrganisationStore from '../stores/organisation-store';
-import AccountStore from '../stores/account-store';
+import OrganisationStore from 'common/stores/organisation-store';
+import AccountStore from 'common/stores/account-store';
 
 const OrganisationProvider = class extends Component {
     static displayName = 'OrganisationProvider'
@@ -14,7 +14,7 @@ const OrganisationProvider = class extends Component {
             users: OrganisationStore.getUsers(),
             invites: OrganisationStore.getInvites(),
             name: AccountStore.getOrganisation() && AccountStore.getOrganisation().name,
-            usage: OrganisationStore.getUsage(),
+            subscriptionMeta: OrganisationStore.getSubscriptionMeta(),
         };
         ES6Component(this);
         this.listenTo(OrganisationStore, 'change', () => {
@@ -26,8 +26,7 @@ const OrganisationProvider = class extends Component {
                 users: OrganisationStore.getUsers(),
                 invites: OrganisationStore.getInvites(),
                 inviteLinks: OrganisationStore.getInviteLinks(),
-                usage: OrganisationStore.getUsage(),
-                influx_data: OrganisationStore.getInflux(),
+                subscriptionMeta: OrganisationStore.getSubscriptionMeta(),
             });
         });
         this.listenTo(OrganisationStore, 'saved', () => {
@@ -47,7 +46,17 @@ const OrganisationProvider = class extends Component {
         return (
             this.props.children(
                 {
-                    ...this.state,
+                    ...{
+                        isSaving: OrganisationStore.isSaving,
+                        isLoading: OrganisationStore.isLoading,
+                        projects: OrganisationStore.getProjects(this.props.id),
+                        project: OrganisationStore.getProject(),
+                        subscriptionMeta: OrganisationStore.getSubscriptionMeta(),
+                        users: OrganisationStore.getUsers(),
+                        invites: OrganisationStore.getInvites(),
+                        inviteLinks: OrganisationStore.getInviteLinks(),
+                    },
+                    invalidateInviteLink: AppActions.invalidateInviteLink,
                     createProject: this.createProject,
                     selectProject: this.selectProject,
                 },
@@ -56,6 +65,10 @@ const OrganisationProvider = class extends Component {
     }
 };
 
-OrganisationProvider.propTypes = {};
+OrganisationProvider.propTypes = {
+    id: OptionalString,
+    onSave: OptionalFunc,
+    children: OptionalFunc,
+};
 
 module.exports = OrganisationProvider;

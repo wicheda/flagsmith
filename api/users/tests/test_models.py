@@ -4,10 +4,6 @@ import pytest
 from django.db.utils import IntegrityError
 
 from environments.models import Environment
-from environments.permissions.models import (
-    EnvironmentPermissionModel,
-    UserEnvironmentPermission,
-)
 from organisations.models import Organisation, OrganisationRole
 from organisations.permissions.models import (
     UserOrganisationPermission,
@@ -91,34 +87,33 @@ class FFAdminUserTestCase(TestCase):
         # Then
         assert self.organisation in admin_orgs
 
-    def test_get_permitted_environments_for_org_admin_returns_all_environments(self):
+    def test_get_permitted_environments_for_org_admin_returns_all_environments_for_project(
+        self,
+    ):
         # Given
         self.user.add_organisation(self.organisation, OrganisationRole.ADMIN)
 
         # When
-        environments = self.user.get_permitted_environments(["VIEW_ENVIRONMENT"])
+        environments = self.user.get_permitted_environments(
+            "VIEW_ENVIRONMENT", project=self.project_1
+        )
 
         # Then
-        assert environments.count() == 2
+        assert environments.count() == self.project_1.environments.count()
 
     def test_get_permitted_environments_for_user_returns_only_environments_matching_permission(
         self,
     ):
         # Given
         self.user.add_organisation(self.organisation, OrganisationRole.USER)
-        user_environment_permission = UserEnvironmentPermission.objects.create(
-            user=self.user, environment=self.environment_1
-        )
-        read_permission = EnvironmentPermissionModel.objects.get(key="VIEW_ENVIRONMENT")
-        user_environment_permission.permissions.set([read_permission])
 
         # When
         environments = self.user.get_permitted_environments(
-            permissions=["VIEW_ENVIRONMENT"]
+            "VIEW_ENVIRONMENT", project=self.project_1
         )
 
         # Then
-        assert environments.count() == 1
+        assert len(list(environments)) == 0
 
     def test_unique_user_organisation(self):
         # Given organisation and user
@@ -267,3 +262,59 @@ def test_user_add_organisation_calls_mailer_lite_subscribe_for_paid_organisation
 
     # Then
     mailer_lite_mock.subscribe.assert_called_with(user)
+
+
+def test_user_add_organisation_adds_user_to_the_default_user_permission_group(
+    test_user, organisation, default_user_permission_group, user_permission_group
+):
+    # When
+    test_user.add_organisation(organisation, OrganisationRole.USER)
+
+    # Then
+    assert default_user_permission_group in test_user.permission_groups.all()
+    assert user_permission_group not in test_user.permission_groups.all()
+
+
+def test_user_remove_organisation_removes_user_from_the_user_permission_group(
+    user_permission_group, admin_user, organisation, default_user_permission_group
+):
+    # Given - two groups that belongs to the same organisation, but user
+    # is only part of one(`user_permission_group`) them
+
+    # When
+    admin_user.remove_organisation(organisation)
+
+    # Then
+    # extra group did not cause any errors and the user is removed from the group
+    assert user_permission_group not in admin_user.permission_groups.all()
+
+
+def test_user_create_calls_pipedrive_tracking(mocker, db, settings):
+    # Given
+    mocked_create_pipedrive_lead = mocker.patch("users.signals.create_pipedrive_lead")
+    settings.ENABLE_PIPEDRIVE_LEAD_TRACKING = True
+
+    # When
+    FFAdminUser.objects.create(email="test@example.com")
+
+    # Then
+    mocked_create_pipedrive_lead.delay.assert_called()
+
+
+def test_user_create_does_not_call_pipedrive_tracking_if_ignored_domain(
+    mocker, db, settings
+):
+    # Given
+    mocked_create_pipedrive_lead = mocker.patch("users.signals.create_pipedrive_lead")
+    settings.ENABLE_PIPEDRIVE_LEAD_TRACKING = True
+    settings.PIPEDRIVE_IGNORE_DOMAINS = ["example.com"]
+
+    # When
+    FFAdminUser.objects.create(email="test@example.com")
+
+    # Then
+    mocked_create_pipedrive_lead.delay.assert_not_called()
+
+
+def test_user_email_domain_property():
+    assert FFAdminUser(email="test@example.com").email_domain == "example.com"

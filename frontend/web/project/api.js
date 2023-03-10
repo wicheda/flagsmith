@@ -96,13 +96,33 @@ global.API = {
     setEvent(v) {
         return API.setCookie('event', v);
     },
+    setRedirect(v) {
+        return API.setCookie('redirect', v);
+    },
+    getRedirect(v) {
+        return API.getCookie('redirect');
+    },
     getCookie(key) {
-        return require('js-cookie').get(key);
+        const res = require('js-cookie').get(key);
+        if(res) { //reset expiry
+            API.setCookie(key,res)
+        }
+        return res;
     },
     setCookie(key, v) {
         try {
-            require('js-cookie').set(key, v, { path: '/' });
-            require('js-cookie').set(key, v, { path: '/', domain: Project.cookieDomain });
+            if (!v) {
+                require('js-cookie').remove(key, { path: '/', domain: Project.cookieDomain });
+                require('js-cookie').remove(key, { path: '/' });
+            } else {
+                if (E2E) {
+                    // Since E2E is not https, we can't set secure cookies
+                    require('js-cookie').set(key, v, { path: '/', expires: 30 });
+                } else {
+                    // We need samesite secure cookies to allow for IFrame embeds from 3rd parties
+                    require('js-cookie').set(key, v, { path: '/', sameSite: 'none', secure:true, expires: 30 });
+                }
+            }
         } catch (e) {
 
         }
@@ -113,6 +133,13 @@ global.API = {
     },
     getInvite() {
         return require('js-cookie').get('invite');
+    },
+    setInviteType(id) {
+        const cookie = require('js-cookie');
+        cookie.set('invite-type', id);
+    },
+    getInviteType() {
+        return require('js-cookie').get('invite-type') || "NO_INVITE";
     },
     trackPage(title) {
         if (Project.ga) {
@@ -146,8 +173,8 @@ global.API = {
 
         if (Project.heap) {
             heap.identify(id);
-            const orgs = (user && user.organisations && _.map(user.organisations, o => `${o.name} #${o.id}(${o.role})[${o.num_seats}]`).join(',')) || '';
             const user = AccountStore.model;
+            const orgs = (user && user.organisations && _.map(user.organisations, o => `${o.name} #${o.id}(${o.role})[${o.num_seats}]`).join(',')) || '';
             const plans = AccountStore.getPlans();
             heap.addUserProperties({
                 email: id,
@@ -212,13 +239,6 @@ global.API = {
             flagsmith.identify(id);
             flagsmith.setTrait('organisations', user.organisations ? user.organisations.map(o => `"${o.id}"`).join(',') : '');
             flagsmith.setTrait('email', id);
-            if (window.$crisp) {
-                $crisp.push(['set', 'user:email', id]);
-                $crisp.push(['set', 'user:nickname', `${user.first_name} ${user.last_name}`]);
-                if (orgs) {
-                    $crisp.push(['set', 'user:company', orgs]);
-                }
-            }
         } catch (e) {
             console.error('Error identifying', e);
         }
@@ -243,3 +263,5 @@ global.API = {
         console.log.apply(this, arguments);
     },
 };
+
+export default API

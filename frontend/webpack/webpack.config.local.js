@@ -3,10 +3,11 @@ const webpack = require('webpack');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const path = require('path');
 
-const whitelabel = typeof process.env.WHITELABEL === 'undefined' ? false : process.env.WHITELABEL;
-const styles = whitelabel ? path.join(__dirname, `../web/styles/whitelabel/${process.env.WHITELABEL}`) : path.join(__dirname, '../web/styles');
+const base = require('./webpack.base');
+
 module.exports = {
-    devtool: 'cheap-module-eval-source-map',
+    ...base,
+    devtool: 'eval-source-map',
     mode: 'development',
     stats: 'errors-only',
     entry: [
@@ -22,16 +23,7 @@ module.exports = {
         publicPath: '/',
         devtoolModuleFilenameTemplate: 'file://[absolute-resource-path]',
     },
-    externals: {
-        // require('jquery') is external and available
-        //  on the global var jQuery
-        'jquery': 'jQuery',
-    },
-    resolve: {
-        alias: {
-            styles,
-        },
-    },
+
     plugins: require('./plugins').concat([
         new webpack.HotModuleReplacementPlugin(),
         new webpack.DefinePlugin({
@@ -45,6 +37,7 @@ module.exports = {
             jquery: 'jquery',
         }),
     ]).concat(require('./pages').map((page) => {
+        // eslint-disable-next-line no-console
         console.log(page);
         return new HtmlWebpackPlugin({
             filename: `${page}.html`, // output
@@ -59,22 +52,20 @@ module.exports = {
                     use: [{
                         loader: 'style-loader',
                         options: {
-                            sourceMap: true,
-                            convertToAbsoluteUrls: false,
                         },
                     },
-                        {
-                            loader: 'css-loader',
-                            options: {
-                                importLoaders: 1,
-                                sourceMap: true,
-                            },
-                        }, {
-                            loader: 'sass-loader',
-                            options: {
-                                sourceMap: true,
-                            },
-                        }],
+                    {
+                        loader: 'css-loader',
+                        options: {
+                            importLoaders: 1,
+                            sourceMap: true,
+                        },
+                    }, {
+                        loader: 'sass-loader',
+                        options: {
+                            sourceMap: true,
+                        },
+                    }],
                 },
             ]),
     },

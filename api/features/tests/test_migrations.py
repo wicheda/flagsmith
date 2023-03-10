@@ -1,3 +1,14 @@
+from datetime import timedelta
+
+import pytest
+from django.conf import settings
+from django.utils import timezone
+
+
+@pytest.mark.skipif(
+    settings.SKIP_MIGRATION_TESTS is True,
+    reason="Skip migration tests to speed up tests where necessary",
+)
 def test_migrate_feature_segments_forward(migrator):
     # Given - the migration state is at 0017 (before the migration we want to test)
     old_state = migrator.apply_initial_migration(
@@ -74,6 +85,10 @@ def test_migrate_feature_segments_forward(migrator):
     assert NewFeatureState.objects.values("feature_segment").distinct().count() == 4
 
 
+@pytest.mark.skipif(
+    settings.SKIP_MIGRATION_TESTS is True,
+    reason="Skip migration tests to speed up tests where necessary",
+)
 def test_migrate_feature_segments_reverse(migrator):
     # Given - migration state is at 0018, after the migration we want to test in reverse
     old_state = migrator.apply_initial_migration(
@@ -126,3 +141,54 @@ def test_migrate_feature_segments_reverse(migrator):
     # correct value. Just verify that the essential data is the same.
     assert NewFeatureSegment.objects.first().feature.pk == feature.pk
     assert NewFeatureSegment.objects.first().segment.pk == segment.pk
+
+
+@pytest.mark.skipif(
+    settings.SKIP_MIGRATION_TESTS is True,
+    reason="Skip migration tests to speed up tests where necessary",
+)
+def test_revert_feature_state_versioning_migrations(migrator):
+    # Given
+    old_state = migrator.apply_initial_migration(
+        ("features", "0038_remove_old_versions_and_drafts")
+    )
+
+    Organisation = old_state.apps.get_model("organisations", "Organisation")
+    Project = old_state.apps.get_model("projects", "Project")
+    Environment = old_state.apps.get_model("environments", "Environment")
+    Feature = old_state.apps.get_model("features", "Feature")
+    FeatureState = old_state.apps.get_model("features", "FeatureState")
+
+    organisation = Organisation.objects.create(name="test org")
+    project = Project.objects.create(name="test project", organisation=organisation)
+    environment = Environment.objects.create(name="test environment", project=project)
+    feature = Feature.objects.create(name="test_feature", project=project)
+
+    v1 = FeatureState.objects.create(
+        environment=environment,
+        feature=feature,
+        version=1,
+        live_from=timezone.now() - timedelta(days=1),
+    )
+    v2 = FeatureState.objects.create(
+        environment=environment,
+        feature=feature,
+        version=2,
+        live_from=timezone.now() - timedelta(days=1),
+    )
+    v3 = FeatureState.objects.create(
+        environment=environment,
+        feature=feature,
+        version=3,
+        live_from=timezone.now() + timedelta(days=1),
+    )
+
+    # When
+    new_state = migrator.apply_tested_migration(("features", "0035_auto_20211109_0603"))
+
+    # Then
+    # only the latest live versions of feature states are retained
+    NewFeatureState = new_state.apps.get_model("features", "FeatureState")
+    assert not NewFeatureState.objects.filter(id=v1.id).exists()
+    assert not NewFeatureState.objects.filter(id=v3.id).exists()
+    assert NewFeatureState.objects.filter(id=v2.id).exists()

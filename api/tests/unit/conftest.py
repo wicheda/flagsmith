@@ -1,9 +1,12 @@
 import pytest
+from rest_framework.test import APIClient
 
+from api_keys.models import MasterAPIKey
 from environments.models import Environment
 from features.models import Feature
-from organisations.models import Organisation
+from organisations.models import Organisation, OrganisationRole
 from projects.models import Project
+from projects.tags.models import Tag
 from users.models import FFAdminUser
 
 
@@ -77,9 +80,107 @@ def organisation_one_user(user_one, organisation_one):
 
 
 @pytest.fixture()
+def organisation_one_admin_user(organisation_one):
+    organisation_one_admin_user = FFAdminUser.objects.create(
+        email="org1_admin@example.com"
+    )
+    organisation_one_admin_user.add_organisation(
+        organisation_one, role=OrganisationRole.ADMIN
+    )
+    return organisation_one_admin_user
+
+
+@pytest.fixture()
 def organisation_one_project_one_feature_one(organisation_one_project_one):
     return Feature.objects.create(
         project=organisation_one_project_one,
         name="feature_1",
         initial_value="feature_1_value",
+    )
+
+
+@pytest.fixture()
+def master_api_key(organisation):
+    master_api_key, key = MasterAPIKey.objects.create_key(
+        name="test_key", organisation=organisation
+    )
+    return master_api_key, key
+
+
+@pytest.fixture()
+def master_api_key_client(master_api_key):
+    # Can not use `api_client` fixture here because:
+    # https://docs.pytest.org/en/6.2.x/fixture.html#fixtures-can-be-requested-more-than-once-per-test-return-values-are-cached
+    api_client = APIClient()
+    api_client.credentials(HTTP_AUTHORIZATION="Api-Key " + master_api_key[1])
+    return api_client
+
+
+@pytest.fixture()
+def dynamo_enabled_project(organisation):
+    return Project.objects.create(
+        name="Dynamo enabled project",
+        organisation=organisation,
+        enable_dynamo_db=True,
+    )
+
+
+@pytest.fixture()
+def realtime_enabled_project(organisation_one):
+    return Project.objects.create(
+        name="Realtime enabled project",
+        organisation=organisation_one,
+        enable_realtime_updates=True,
+    )
+
+
+@pytest.fixture()
+def realtime_enabled_project_environment_one(realtime_enabled_project):
+    return Environment.objects.create(
+        name="Env 1 realtime",
+        project=realtime_enabled_project,
+        api_key="env-1-realtime-key",
+    )
+
+
+@pytest.fixture()
+def realtime_enabled_project_environment_two(realtime_enabled_project):
+    return Environment.objects.create(
+        name="Env 2 realtime",
+        project=realtime_enabled_project,
+        api_key="env-2-realtime-key",
+    )
+
+
+@pytest.fixture()
+def dynamo_enabled_project_environment_one(dynamo_enabled_project):
+    return Environment.objects.create(
+        name="Env 1", project=dynamo_enabled_project, api_key="env-1-key"
+    )
+
+
+@pytest.fixture()
+def dynamo_enabled_project_environment_two(dynamo_enabled_project):
+    return Environment.objects.create(
+        name="Env 2", project=dynamo_enabled_project, api_key="env-2-key"
+    )
+
+
+@pytest.fixture()
+def tag_one(project):
+    return Tag.objects.create(
+        label="Test Tag",
+        color="#fffff",
+        description="Test Tag description",
+        project=project,
+    )
+
+
+@pytest.fixture()
+def tag_two(project):
+    return Tag.objects.create(
+        label="Test Tag2",
+        color="#fffff",
+        description="Test Tag2 description",
+        project=project,
     )

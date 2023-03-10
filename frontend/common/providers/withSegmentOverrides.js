@@ -1,6 +1,6 @@
-import data from '../data/base/_data';
-import SegmentListStore from '../stores/segment-list-store';
-import ProjectStore from '../stores/project-store';
+import data from 'common/data/base/_data';
+import ProjectStore from 'common/stores/project-store';
+import FeatureListStore from 'common/stores/feature-list-store';
 
 export default (WrappedComponent) => {
     class HOC extends React.Component {
@@ -9,15 +9,11 @@ export default (WrappedComponent) => {
         constructor(props) {
             super(props);
             ES6Component(this);
-            this.state = {
-                segments: SegmentListStore.getSegments(),
-            };
-
-            this.listenTo(SegmentListStore, 'change', () => {
-                this.setState({
-                    segments: SegmentListStore.getSegments(),
-                });
+            this.listenTo(FeatureListStore, 'saved', () => {
+                this.getOverrides();
             });
+            this.state = {
+            };
         }
 
         componentDidMount() {
@@ -34,7 +30,6 @@ export default (WrappedComponent) => {
                         const results = res.results;
                         const featureStates = res2.results;
                         const environmentOverride = res2.results.find(v => !v.feature_segment && !v.identity);
-
                         _.each(featureStates, (f) => {
                             if (f.feature_segment) {
                                 const index = _.findIndex(results, { id: f.feature_segment });
@@ -43,12 +38,21 @@ export default (WrappedComponent) => {
                                     results[index].enabled = f.enabled;
                                     results[index].feature_segment_value = f;
                                     const multiVariates = res2 && res2.results.find(mv => mv.feature_segment = f.feature_segment);
-                                    results[index].multivariate_feature_state_values = multiVariates && multiVariates.multivariate_feature_state_values || [];
+                                    results[index].multivariate_feature_state_values = (multiVariates && multiVariates.multivariate_feature_state_values) || [];
                                     results[index].multivariate_options = f.multivariate_feature_state_values;
                                 }
                             }
                         });
-                        this.setState({ segmentOverrides: res.results, environmentVariations: environmentOverride && environmentOverride.multivariate_feature_state_values && environmentOverride.multivariate_feature_state_values });
+                        const resResults = res.results || [];
+                        const segmentOverrides = (results).concat(
+                            (this.props.newSegmentOverrides || []).map((v, i) => ({
+                                ...v,
+                                priority: resResults.length + (i),
+                            })),
+                        );
+                        const originalSegmentOverrides = _.cloneDeep(segmentOverrides);
+                        this.setState({
+                            segmentOverrides, originalSegmentOverrides, environmentVariations: environmentOverride && environmentOverride.multivariate_feature_state_values && environmentOverride.multivariate_feature_state_values });
                     });
             }
         }
@@ -58,7 +62,7 @@ export default (WrappedComponent) => {
         }
 
 
-        removeMultiVariateOption = (id) => {
+        removeMultivariateOption = (id) => {
             this.setState({
                 segmentOverrides: this.state.segmentOverrides && this.state.segmentOverrides.map(v => ({
                     ...v,
@@ -75,7 +79,7 @@ export default (WrappedComponent) => {
                   ref="wrappedComponent"
                   updateSegments={this.updateSegments}
                   onEnvironmentVariationsChange={this.onEnvironmentVariationsChange}
-                  removeMultiVariateOption={this.removeMultiVariateOption}
+                  removeMultivariateOption={this.removeMultivariateOption}
                   {...this.props}
                   {...this.state}
                 />

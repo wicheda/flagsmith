@@ -1,26 +1,27 @@
 import logging
 
-import boto3
-from django.conf import settings
-from django.db.models import Q
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-from flag_engine.django_transform.document_builders import (
-    build_environment_document,
-)
 
+from audit.decorators import handle_skipped_signals
 from audit.models import AuditLog, RelatedObjectType
 from audit.serializers import AuditLogSerializer
 from environments.models import Environment
 from integrations.datadog.datadog import DataDogWrapper
+from integrations.dynatrace.dynatrace import DynatraceWrapper
 from integrations.new_relic.new_relic import NewRelicWrapper
 from integrations.slack.slack import SlackWrapper
+from sse import (
+    send_environment_update_message_for_environment,
+    send_environment_update_message_for_project,
+)
 from webhooks.webhooks import WebhookEventType, call_organisation_webhooks
 
 logger = logging.getLogger(__name__)
 
 
 @receiver(post_save, sender=AuditLog)
+@handle_skipped_signals
 def call_webhooks(sender, instance, **kwargs):
     data = AuditLogSerializer(instance=instance).data
 
@@ -37,10 +38,12 @@ def call_webhooks(sender, instance, **kwargs):
 
 
 def _get_integration_config(instance, integration_name):
-    if not hasattr(instance.project, integration_name):
-        return None
+    if hasattr(instance.project, integration_name):
+        return getattr(instance.project, integration_name)
+    elif hasattr(instance.environment, integration_name):
+        return getattr(instance.environment, integration_name)
 
-    return getattr(instance.project, integration_name)
+    return None
 
 
 def track_only_feature_related_events(signal_function):
@@ -71,6 +74,7 @@ def _track_event_async(instance, integration_client):
 
 @receiver(post_save, sender=AuditLog)
 @track_only_feature_related_events
+@handle_skipped_signals
 def send_audit_log_event_to_datadog(sender, instance, **kwargs):
     data_dog_config = _get_integration_config(instance, "data_dog_config")
 
@@ -85,8 +89,8 @@ def send_audit_log_event_to_datadog(sender, instance, **kwargs):
 
 @receiver(post_save, sender=AuditLog)
 @track_only_feature_related_events
+@handle_skipped_signals
 def send_audit_log_event_to_new_relic(sender, instance, **kwargs):
-
     new_relic_config = _get_integration_config(instance, "new_relic_config")
     if not new_relic_config:
         return
@@ -99,34 +103,42 @@ def send_audit_log_event_to_new_relic(sender, instance, **kwargs):
     _track_event_async(instance, new_relic)
 
 
-# Intialize the dynamo client globally
-dynamo_env_table = None
-if settings.ENVIRONMENTS_TABLE_NAME_DYNAMO:
-    dynamo_env_table = boto3.resource("dynamodb").Table(
-        settings.ENVIRONMENTS_TABLE_NAME_DYNAMO
+@receiver(post_save, sender=AuditLog)
+@track_only_feature_related_events
+@handle_skipped_signals
+def send_audit_log_event_to_dynatrace(sender, instance, **kwargs):
+    dynatrace_config = _get_integration_config(instance, "dynatrace_config")
+    if not dynatrace_config:
+        return
+
+    dynatrace = DynatraceWrapper(
+        base_url=dynatrace_config.base_url,
+        api_key=dynatrace_config.api_key,
+        entity_selector=dynatrace_config.entity_selector,
+    )
+    _track_event_async(instance, dynatrace)
+
+
+@receiver(post_save, sender=AuditLog)
+@handle_skipped_signals
+def send_environments_to_dynamodb(sender, instance, **kwargs):
+    Environment.write_environments_to_dynamodb(
+        environment_id=instance.environment_id, project_id=instance.project_id
     )
 
 
 @receiver(post_save, sender=AuditLog)
-def send_environments_to_dynamodb(sender, instance, **kwargs):
-    environments_filter = (
-        Q(id=instance.environment_id)
-        if instance.environment_id
-        else Q(project=instance.project)
-    )
-    environments = Environment.objects.filter_for_document_builder(environments_filter)
-
-    project = instance.project or getattr(environments.first(), "project", None)
-    if not (project and project.enable_dynamo_db and dynamo_env_table):
-        return
-
-    with dynamo_env_table.batch_writer() as writer:
-        for environment in environments:
-            writer.put_item(Item=build_environment_document(environment))
+@handle_skipped_signals
+def trigger_environment_update_messages(sender, instance, **kwargs):
+    if instance.environment_id:
+        send_environment_update_message_for_environment(instance.environment)
+    elif instance.project_id:
+        send_environment_update_message_for_project(instance.project)
 
 
 @receiver(post_save, sender=AuditLog)
 @track_only_feature_related_events
+@handle_skipped_signals
 def send_audit_log_event_to_slack(sender, instance, **kwargs):
     slack_project_config = _get_integration_config(instance, "slack_config")
     if not slack_project_config:

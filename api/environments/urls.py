@@ -1,12 +1,18 @@
 from django.conf.urls import include, url
+from django.urls import path
 from rest_framework_nested import routers
 
-from edge_api.identities.views import EdgeIdentityFeatureStateViewSet
+from edge_api.identities.views import (
+    EdgeIdentityFeatureStateViewSet,
+    EdgeIdentityViewSet,
+    EdgeIdentityWithIdentifierFeatureStateView,
+)
 from features.views import (
     EnvironmentFeatureStateViewSet,
     IdentityFeatureStateViewSet,
 )
 from integrations.amplitude.views import AmplitudeConfigurationViewSet
+from integrations.dynatrace.views import DynatraceConfigurationViewSet
 from integrations.heap.views import HeapConfigurationViewSet
 from integrations.mixpanel.views import MixpanelConfigurationViewSet
 from integrations.rudderstack.views import RudderstackConfigurationViewSet
@@ -18,7 +24,7 @@ from integrations.slack.views import (
 from integrations.webhook.views import WebhookConfigurationViewSet
 
 from .identities.traits.views import TraitViewSet
-from .identities.views import EdgeIdentityViewSet, IdentityViewSet
+from .identities.views import IdentityViewSet
 from .permissions.views import (
     UserEnvironmentPermissionsViewSet,
     UserPermissionGroupEnvironmentPermissionsViewSet,
@@ -67,6 +73,11 @@ environments_router.register(
     r"integrations/heap",
     HeapConfigurationViewSet,
     basename="integrations-heap",
+)
+environments_router.register(
+    r"integrations/dynatrace",
+    DynatraceConfigurationViewSet,
+    basename="integrations-dynatrace",
 )
 environments_router.register(
     r"integrations/mixpanel",
@@ -120,4 +131,9 @@ urlpatterns = [
     url(r"^", include(environments_router.urls)),
     url(r"^", include(identity_router.urls)),
     url(r"^", include(edge_identity_router.urls)),
+    path(
+        "environments/<str:environment_api_key>/edge-identities-featurestates",
+        EdgeIdentityWithIdentifierFeatureStateView.as_view(),
+        name="edge-identities-with-identifier-featurestates",
+    ),
 ]

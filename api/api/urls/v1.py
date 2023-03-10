@@ -34,10 +34,13 @@ urlpatterns = [
     url(r"^projects/", include("projects.urls"), name="projects"),
     url(r"^environments/", include("environments.urls"), name="environments"),
     url(r"^features/", include("features.urls"), name="features"),
+    url(r"^multivariate/", include("features.multivariate.urls"), name="multivariate"),
+    url(r"^segments/", include("segments.urls"), name="segments"),
     url(r"^users/", include("users.urls")),
     url(r"^e2etests/", include("e2etests.urls")),
     url(r"^audit/", include("audit.urls")),
     url(r"^auth/", include("custom_auth.urls")),
+    url(r"^metadata/", include("metadata.urls")),
     # Chargebee webhooks
     url(r"cb-webhook/", chargebee_webhook, name="chargebee-webhook"),
     # Client SDK urls

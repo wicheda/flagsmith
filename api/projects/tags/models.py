@@ -1,14 +1,15 @@
+from core.models import AbstractBaseExportableModel
 from django.db import models
 
 from projects.models import Project
 
 
-class Tag(models.Model):
+class Tag(AbstractBaseExportableModel):
     label = models.CharField(max_length=100)
     color = models.CharField(
         max_length=10, help_text="Hexadecimal value of the tag color"
     )
-    description = models.CharField(max_length=512)
+    description = models.CharField(max_length=512, blank=True, null=True)
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="tags")
 
     class Meta:

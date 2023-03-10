@@ -1,45 +1,26 @@
-var Utils = {
-    emailRegex: /^([\w-+]+(?:\.[\w-]+)*)@((?:[\w-]+\.)*\w[\w-]{0,66})\.([a-z]{2,6}(?:\.[a-z]{2})?)$/i,
+const Utils = {
+    // eslint-disable-next-line
+    emailRegex: /(?:[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*|"(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21\x23-\x5b\x5d-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])*")@(?:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?|\[(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?|[a-z0-9-]*[a-z0-9]:(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21-\x5a\x53-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])+)\])/i,
+    // eslint-disable-next-line
     urlRegex: /^(?:http(s)?:\/\/)?[\w.-]+(?:\.[\w\.-]+)+[\w\-\._~:/?#[\]@!\$&'\(\)\*\+,;=.]+$/,
 
     keys: {
-        isUndo(e) {
-            return (e.ctrlKey || e.metaKey) && e.keyCode === (e.shiftKey ? KEYCODE_Y : KEYCODE_Z);
-        },
+
         isEscape(e) {
             const code = (e.keyCode ? e.keyCode : e.which);
-            return code == 27 && !e.shiftKey && !e.ctrlKey;
-        },
-        isRedo(e) {
-            return (e.ctrlKey || e.metaKey) && e.keyCode === (e.shiftKey ? KEYCODE_Z : KEYCODE_Y);
-        },
-        isBackspace(e) { // returns bool
-            const code = (e.keyCode ? e.keyCode : e.which);
-            return code == 8 && !e.shiftKey && !e.ctrlKey;
+            return code === 27 && !e.shiftKey && !e.ctrlKey;
         },
         isUp(e) { // returns bool
             const code = (e.keyCode ? e.keyCode : e.which);
-            return code == 38 && !e.shiftKey && !e.ctrlKey;
+            return code === 38 && !e.shiftKey && !e.ctrlKey;
         },
         isDown(e) { // returns bool
             const code = (e.keyCode ? e.keyCode : e.which);
-            return code == 40 && !e.shiftKey && !e.ctrlKey;
-        },
-        isLeft(e) { // returns bool
-            const code = (e.keyCode ? e.keyCode : e.which);
-            return code == 37 && !e.shiftKey && !e.ctrlKey;
-        },
-        isRight(e) { // returns bool
-            const code = (e.keyCode ? e.keyCode : e.which);
-            return code == 39 && !e.shiftKey && !e.ctrlKey;
-        },
-        isTab(e) { // returns bool
-            const code = (e.keyCode ? e.keyCode : e.which);
-            return code == 9 && !e.shiftKey && !e.ctrlKey;
+            return code === 40 && !e.shiftKey && !e.ctrlKey;
         },
         isEnter(e) { // returns bool
             const code = (e.keyCode ? e.keyCode : e.which);
-            return code == 13 && !e.shiftKey && !e.ctrlKey;
+            return code === 13 && !e.shiftKey && !e.ctrlKey;
         },
     },
 
@@ -70,17 +51,23 @@ var Utils = {
         };
     },
 
-    toParam(obj) { // {min:100,max:200} -> ?min=100&max=200
-        return Object.keys(obj).map(k => `${encodeURIComponent(k)}=${encodeURIComponent(obj[k])}`).join('&');
+    toParam(obj) { // {min:100,max:200} -> min=100&max=200
+        return Object.keys(obj).filter(v => obj[v] !== undefined).map(k => `${encodeURIComponent(k)}=${encodeURIComponent(obj[k])}`).join('&');
     },
 
-    fromParam(str) { // {min:100,max:200} <- ?min=100&max=200
-        if (!str && !document.location.search) {
+    fromParam(str) {
+        // {min:100,max:200} <- ?min=100&max=200
+        const documentSearch = typeof document === 'undefined' ? '' : document.location.search;
+
+        if (!str && !documentSearch) {
             return {};
         }
         // eslint-disable-next-line
-        const urlString= (str || document.location.search).replace(/(^\?)/, '');
-        return JSON.parse(`{"${urlString.replace(/&/g, '","').replace(/=/g, '":"')}"}`, (key, value) => (key === '' ? value : decodeURIComponent(value)));
+        const urlString = (str || documentSearch).replace(/(^\?)/, '');
+        return JSON.parse(
+            `{"${urlString.replace(/&/g, '","').replace(/=/g, '":"')}"}`,
+            (key, value) => (key === '' ? value : decodeURIComponent(value)),
+        );
     },
 
     preventDefault(e) {
@@ -125,8 +112,10 @@ var Utils = {
     GUID(append) {
         let d = new Date().getTime();
         const uuid = 'xxxx-xxxx-xxxx'.replace(/[xy]/g, (c) => {
+            // eslint-disable-next-line
             const r = (d + Math.random() * 16) % 16 | 0;
             d = Math.floor(d / 16);
+            // eslint-disable-next-line
             return (c == 'x' ? r : (r & 0x3 | 0x8)).toString(16);
         });
 

@@ -1,23 +1,27 @@
+import { t } from 'testcafe';
 import {
     addSegmentOverride,
     addSegmentOverrideConfig,
     assertTextContent,
     byId,
-    click, createFeature, createRemoteConfig,
-    createSegment, createTrait, deleteFeature, gotoFeature,
+    click, closeModal, createFeature, createRemoteConfig,
+    createSegment, createTrait, deleteFeature, getLogger, gotoFeature,
     gotoFeatures,
     gotoSegments, goToUser,
     log,
-    login, saveFeature, setSegmentOverrideIndex,
+    login, saveFeature, saveFeatureSegments, setSegmentOverrideIndex,
     setText, viewFeature,
     waitForElementVisible,
+    waitAndRefresh, logResults,
 } from '../helpers.cafe';
-import {t} from 'testcafe'
+
 const email = 'nightwatch@solidstategroup.com';
 const password = 'str0ngp4ssw0rd!';
+const logger = getLogger();
 
 fixture`Segments Tests`
-    .page`http://localhost:3000/`;
+    .page`http://localhost:3000/`
+    .requestHooks(logger);
 
 test('Segments Test', async () => {
     log('Login', 'Segment Test');
@@ -58,19 +62,19 @@ test('Segments Test', async () => {
     await addSegmentOverrideConfig(0, 3, 2);
     await addSegmentOverrideConfig(1, 2, 1);
     await addSegmentOverrideConfig(2, 1, 0);
-    await saveFeature();
+    await saveFeatureSegments();
     await viewFeature(1);
     await addSegmentOverride(0, true, 2);
     await addSegmentOverride(1, false, 1);
     await addSegmentOverride(2, true, 0);
-    await saveFeature();
+    await saveFeatureSegments();
 
     log('Set user in segment_1', 'Segment Test');
     await goToUser(0);
     await createTrait(0, 'trait', 1);
     await createTrait(1, 'trait2', 2);
     await createTrait(2, 'trait3', 3);
-    await assertTextContent(byId('segment-0-name'), 'segment_1');
+    // await assertTextContent(byId('segment-0-name'), 'segment_1'); todo: view user segments disabled in edge
     await waitForElementVisible(byId('user-feature-switch-1-on'));
     await assertTextContent(byId('user-feature-value-0'), '1');
 
@@ -78,10 +82,10 @@ test('Segments Test', async () => {
     await gotoFeatures();
     await gotoFeature(0);
     await setSegmentOverrideIndex(1, 0);
-    await saveFeature();
+    await saveFeatureSegments();
     await gotoFeature(1);
     await setSegmentOverrideIndex(1, 0);
-    await saveFeature();
+    await saveFeatureSegments();
     await goToUser(0);
     await waitForElementVisible(byId('user-feature-switch-1-off'));
     await assertTextContent(byId('user-feature-value-0'), '2');
@@ -90,10 +94,10 @@ test('Segments Test', async () => {
     await gotoFeatures();
     await gotoFeature(0);
     await setSegmentOverrideIndex(2, 0);
-    await saveFeature();
+    await saveFeatureSegments();
     await gotoFeature(1);
     await setSegmentOverrideIndex(2, 0);
-    await saveFeature();
+    await saveFeatureSegments();
     await goToUser(0);
     await waitForElementVisible(byId('user-feature-switch-1-on'));
     await assertTextContent(byId('user-feature-value-0'), '3');
@@ -106,22 +110,29 @@ test('Segments Test', async () => {
     log('Create features', 'Segment Test');
     await gotoFeatures();
     await createFeature(0, 'flag', true);
-    await createRemoteConfig(0, 'config', 0);
+    await createRemoteConfig(0, 'config', 0, 'Description');
 
     log('Toggle flag for user', 'Segment Test');
     await goToUser(0);
     await click(byId('user-feature-switch-1-on'));
     await click('#confirm-toggle-feature-btn');
+    await waitAndRefresh(); // wait and refresh to avoid issues with data sync from UK -> US in github workflows
     await waitForElementVisible(byId('user-feature-switch-1-off'));
 
     log('Edit flag for user', 'Segment Test');
     await click(byId('user-feature-0'));
     await setText(byId('featureValue'), 'small');
     await click('#update-feature-btn');
+    await waitAndRefresh(); // wait and refresh to avoid issues with data sync from UK -> US in github workflows
     await assertTextContent(byId('user-feature-value-0'), '"small"');
 
     log('Toggle flag for user again', 'Segment Test');
     await click(byId('user-feature-switch-1-off'));
     await click('#confirm-toggle-feature-btn');
+    await waitAndRefresh(); // wait and refresh to avoid issues with data sync from UK -> US in github workflows
     await waitForElementVisible(byId('user-feature-switch-1-on'));
+}).after(async (t) => {
+    console.log('Start of Segments Requests');
+    await logResults(logger.requests);
+    console.log('End of Segments Errors');
 });

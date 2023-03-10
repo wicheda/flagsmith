@@ -1,12 +1,9 @@
-import OrganisationStore from './organisation-store';
-import ConfigStore from './config-store';
-import PermissionsStore from './permissions-store';
-
+const Dispatcher = require('../dispatcher/dispatcher');
 const BaseStore = require('./base/_store');
 const data = require('../data/base/_data');
-
+import Constants from 'common/constants';
 const controller = {
-    register: ({ email, password, first_name, last_name, marketing_consent_given, organisation_name = 'Default Organisation' }, isInvite) => {
+    register: ({ email, password, first_name, last_name, marketing_consent_given }) => {
         store.saving();
         data.post(`${Project.api}auth/users/`, {
             email,
@@ -14,6 +11,7 @@ const controller = {
             first_name,
             last_name,
             marketing_consent_given,
+            sign_up_type: API.getInviteType(),
             referrer: API.getReferrer() || '',
         })
             .then((res) => {
@@ -32,17 +30,11 @@ const controller = {
         store.loading();
         API.trackEvent(Constants.events.OAUTH(type));
 
-        data.post(type === 'saml' ? `${Project.api}auth/saml/login/` : `${Project.api}auth/oauth/${type}/`, _data)
+        data.post(type === 'saml' ? `${Project.api}auth/saml/login/` : `${Project.api}auth/oauth/${type}/`, {
+            ...(_data || {}),
+            sign_up_type: API.getInviteType(),
+        })
             .then((res) => {
-                // const isDemo = email == Project.demoAccount.email;
-                // store.isDemo = isDemo;
-                // if (isDemo) {
-                //     AsyncStorage.setItem('isDemo', `${isDemo}`);
-                //     API.trackEvent(Constants.events.LOGIN_DEMO);
-                // } else {
-                //     API.trackEvent(Constants.events.LOGIN);
-                //     API.identify(email);
-                // }
                 if (res.ephemeral_token) {
                     store.ephemeral_token = res.ephemeral_token;
                     store.model = {
@@ -67,7 +59,7 @@ const controller = {
             new_password: new_password1,
             re_new_password: new_password2,
         })
-            .then((res) => {
+            .then(() => {
                 store.saved();
             })
             .catch(e => API.ajaxHandler(store, e));
@@ -90,7 +82,7 @@ const controller = {
             password,
         })
             .then((res) => {
-                const isDemo = email == Project.demoAccount.email;
+                const isDemo = email === Project.demoAccount.email;
                 store.isDemo = isDemo;
                 if (isDemo) {
                     AsyncStorage.setItem('isDemo', `${isDemo}`);
@@ -122,6 +114,7 @@ const controller = {
     acceptInvite: (id) => {
         store.saving();
         API.setInvite('');
+        API.setInviteType('');
         return data.post(`${Project.api}users/join/link/${id}/`)
             .catch(() => data.post(`${Project.api}users/join/${id}/`))
             .then((res) => {
@@ -212,7 +205,7 @@ const controller = {
         data.put(`${Project.api}organisations/${store.organisation.id}/`, org)
             .then((res) => {
                 const idx = _.findIndex(store.model.organisations, { id: store.organisation.id });
-                if (idx != -1) {
+                if (idx !== -1) {
                     store.model.organisations[idx] = res;
                     store.organisation = res;
                 }
@@ -246,10 +239,18 @@ const controller = {
     setUser(user) {
         if (user) {
             store.model = user;
-            store.organisation = user && user.organisations && user.organisations[0];
+            if (user && user.organisations) {
+                store.organisation = user.organisations[0];
+                const cookiedID = API.getCookie('organisation');
+                if (cookiedID) {
+                    const foundOrganisation = user.organisations.find(v => `${v.id}` === cookiedID);
+                    if (foundOrganisation) {
+                        store.organisation = foundOrganisation;
+                    }
+                }
+            }
 
-
-            if (projectOverrides.delighted) {
+            if (Project.delighted) {
                 delighted.survey({
                     email: store.model.email, // customer email (optional)
                     name: `${store.model.first_name} ${store.model.last_name}`, // customer name (optional)
@@ -274,11 +275,6 @@ const controller = {
             store.isDemo = false;
             store.model = user;
             store.organisation = null;
-            PermissionsStore.model = {
-                availablePermissions: {
-
-                },
-            };
             store.trigger('logout');
             API.reset();
         }
@@ -287,7 +283,7 @@ const controller = {
     deleteOrganisation: () => {
         API.trackEvent(Constants.events.DELETE_ORGANISATION);
         data.delete(`${Project.api}organisations/${store.organisation.id}/`)
-            .then((res) => {
+            .then(() => {
                 store.model.organisations = _.filter(store.model.organisations, org => org.id !== store.organisation.id);
                 store.organisation = store.model.organisations.length ? store.model.organisations[0] : null;
                 store.trigger('removed');
@@ -333,7 +329,7 @@ const store = Object.assign({}, BaseStore, {
             return false;
         }
 
-        return flagsmith.hasFeature('forced_2fa') && store.getOrganisations() && store.getOrganisations().find(o => o.force_2fa);
+        return Utils.getFlagsmithHasFeature('forced_2fa') && store.getOrganisations() && store.getOrganisations().find(o => o.force_2fa);
     },
     setUser(user) {
         controller.setUser(user);
@@ -345,7 +341,7 @@ const store = Object.assign({}, BaseStore, {
         const organisations = store.getOrganisations();
         const organisation = organisations && organisations.find(v => v.id === id);
         if (organisation) {
-            return !!organisation.subscription;
+            return !!organisation.subscription?.subscription_id;
         }
         return null;
     },
@@ -354,8 +350,11 @@ const store = Object.assign({}, BaseStore, {
         return id && store.getOrganisationRole(id) === 'ADMIN';
     },
     getPlans() {
-        if (!store.model) return []
+        if (!store.model) return [];
         return _.filter(store.model.organisations.map(org => org.subscription && org.subscription.plan), plan => !!plan);
+    },
+    getActiveOrgPlan() {
+        return store.organisation && store.organisation.subscription && store.organisation.subscription.plan;
     },
     getDate() {
         return store.getOrganisation() && store.getOrganisation().created_date;
@@ -431,4 +430,4 @@ store.dispatcherIndex = Dispatcher.register(store, (payload) => {
 });
 
 controller.store = store;
-module.exports = controller.store;
+export default controller.store;

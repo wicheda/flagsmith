@@ -1,5 +1,5 @@
 import React, { Component } from 'react';
-import AccountStore from '../stores/account-store';
+import AccountStore from 'common/stores/account-store';
 import AppLoader from '../../web/components/AppLoader';
 
 const AccountProvider = class extends Component {
@@ -91,7 +91,7 @@ const AccountProvider = class extends Component {
         const { isLoading, isSaving, user, organisation, organisations, error } = this.state;
         if (isLoading) {
             return (
-               <AppLoader/>
+                <AppLoader/>
             );
         }
         return (
@@ -120,6 +120,13 @@ const AccountProvider = class extends Component {
     }
 };
 
-AccountProvider.propTypes = {};
+AccountProvider.propTypes = {
+    onRemove: OptionalFunc,
+    onNoUser: OptionalFunc,
+    onSave: OptionalFunc,
+    onLogin: OptionalFunc,
+    onLogout: OptionalFunc,
+    children: OptionalFunc,
+};
 
 module.exports = AccountProvider;

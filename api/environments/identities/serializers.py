@@ -1,16 +1,15 @@
-from flag_engine.identities.builders import build_identity_dict
-from flag_engine.identities.models import IdentityModel as EngineIdentity
+import typing
+
+from drf_yasg2.utils import swagger_serializer_method
+from flag_engine.features.models import FeatureStateModel
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 
 from environments.identities.models import Identity
+from environments.models import Environment
 from environments.serializers import EnvironmentSerializerFull
 from features.models import FeatureState
-from features.serializers import (
-    FeatureStateSerializerFull,
-    FeatureStateValueSerializer,
-    MultivariateFeatureStateValueSerializer,
-)
+from features.serializers import FeatureStateSerializerFull
 
 
 class IdentifierOnlyIdentitySerializer(serializers.ModelSerializer):
@@ -26,44 +25,6 @@ class IdentitySerializerFull(serializers.ModelSerializer):
     class Meta:
         model = Identity
         fields = ("id", "identifier", "identity_features", "environment")
-
-
-class EdgeIdentitySerializer(serializers.ModelSerializer):
-    identity_uuid = serializers.CharField(required=False)
-
-    class Meta:
-        model = Identity
-        fields = ("identifier", "environment", "identity_uuid")
-        read_only_fields = ("environment", "identity_uuid")
-
-    def save(self, **kwargs):
-        identifier = self.validated_data.get("identifier")
-        environment_api_key = self.context["view"].kwargs["environment_api_key"]
-        self.instance = EngineIdentity(
-            identifier=identifier, environment_api_key=environment_api_key
-        )
-        if Identity.dynamo_wrapper.get_item(self.instance.composite_key):
-            raise ValidationError(
-                f"Identity with identifier: {identifier} already exists"
-            )
-        Identity.dynamo_wrapper.put_item(build_identity_dict(self.instance))
-        return self.instance
-
-
-class EdgeIdentitySerializerFeatureStateSerializer(EdgeIdentitySerializer):
-    feature_state_value = FeatureStateValueSerializer(required=False)
-    multivariate_feature_state_values = MultivariateFeatureStateValueSerializer(
-        many=True, required=False
-    )
-
-    class Meta:
-        model = FeatureState
-        fields = (
-            "feature",
-            "environment",
-            "feature_state_value",
-            "multivariate_feature_state_values",
-        )
 
 
 class IdentitySerializer(serializers.ModelSerializer):
@@ -86,3 +47,91 @@ class IdentitySerializer(serializers.ModelSerializer):
                 }
             )
         return super(IdentitySerializer, self).save(**kwargs)
+
+
+class SDKIdentitiesResponseSerializer(serializers.Serializer):
+    class _TraitSerializer(serializers.Serializer):
+        trait_key = serializers.CharField()
+        trait_value = serializers.Field(
+            help_text="Can be of type string, boolean, float or integer."
+        )
+
+    flags = serializers.ListField(child=FeatureStateSerializerFull())
+    traits = serializers.ListSerializer(child=_TraitSerializer())
+
+
+class SDKIdentitiesQuerySerializer(serializers.Serializer):
+    identifier = serializers.CharField(required=True)
+
+
+class IdentityAllFeatureStatesFeatureSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    type = serializers.CharField()
+
+
+class IdentityAllFeatureStatesSegmentSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+
+
+class IdentityAllFeatureStatesMVFeatureOptionSerializer(serializers.Serializer):
+    value = serializers.SerializerMethodField(
+        help_text="Can be any of the following types: integer, boolean, string."
+    )
+
+    def get_value(self, instance) -> typing.Union[str, int, bool]:
+        return instance.value
+
+
+class IdentityAllFeatureStatesMVFeatureStateValueSerializer(serializers.Serializer):
+    multivariate_feature_option = IdentityAllFeatureStatesMVFeatureOptionSerializer()
+    percentage_allocation = serializers.FloatField()
+
+
+class IdentityAllFeatureStatesSerializer(serializers.Serializer):
+    feature = IdentityAllFeatureStatesFeatureSerializer()
+    enabled = serializers.BooleanField()
+    feature_state_value = serializers.SerializerMethodField(
+        help_text="Can be any of the following types: integer, boolean, string."
+    )
+    overridden_by = serializers.SerializerMethodField(
+        help_text="One of: null, 'SEGMENT', 'IDENTITY'."
+    )
+    segment = serializers.SerializerMethodField()
+    multivariate_feature_state_values = (
+        IdentityAllFeatureStatesMVFeatureStateValueSerializer(many=True)
+    )
+
+    def get_feature_state_value(
+        self, instance: typing.Union[FeatureState, FeatureStateModel]
+    ) -> typing.Union[str, int, bool]:
+        identity = self.context["identity"]
+        environment_api_key = self.context["environment_api_key"]
+
+        environment = Environment.get_from_cache(environment_api_key)
+        hash_key = identity.get_hash_key(environment.use_mv_v2_evaluation)
+
+        if isinstance(instance, FeatureState):
+            return instance.get_feature_state_value_by_hash_key(hash_key)
+
+        return instance.get_value(hash_key)
+
+    def get_overridden_by(self, instance) -> typing.Optional[str]:
+        if getattr(instance, "feature_segment_id", None) is not None:
+            return "SEGMENT"
+        elif getattr(
+            instance, "identity_id", None
+        ) or instance.feature.name in self.context.get("identity_feature_names", []):
+            return "IDENTITY"
+        return None
+
+    @swagger_serializer_method(
+        serializer_or_field=IdentityAllFeatureStatesSegmentSerializer
+    )
+    def get_segment(self, instance) -> typing.Optional[typing.Dict[str, typing.Any]]:
+        if getattr(instance, "feature_segment_id", None) is not None:
+            return IdentityAllFeatureStatesSegmentSerializer(
+                instance=instance.feature_segment.segment
+            ).data
+        return None

@@ -1,5 +1,8 @@
-// import propTypes from 'prop-types';
 import React, { PureComponent } from 'react';
+import Constants from 'common/constants';
+import cloneDeep from 'lodash/cloneDeep';
+
+const splitIfValue = (v, append) => (append ? v.split(append) : [v === null ? '' : v]);
 
 export default class Rule extends PureComponent {
     static displayName = 'Rule';
@@ -10,6 +13,15 @@ export default class Rule extends PureComponent {
         const { props: { operators, rule: { conditions: rules } } } = this;
         const isLastRule = i === (rules.length - 1);
         const hasOr = i > 0;
+        const operatorObj = Utils.findOperator(rule.operator, rule.value, operators);
+        const operator = operatorObj && operatorObj.value;
+        const value = typeof rule.value === 'string' ? rule.value.replace((operatorObj && operatorObj.append) || '', '') : rule.value;
+
+        if (rule.delete) {
+            return null
+        }
+
+        const valuePlaceholder = rule.hideValue ? 'Value (N/A)' : rule.valuePlaceholder || 'Value';
         return (
             <div className="rule__row reveal" key={i}>
                 {hasOr && (
@@ -33,9 +45,9 @@ export default class Rule extends PureComponent {
                                         data-test={`${this.props['data-test']}-property-${i}`}
                                         className="input-container full-width"
                                         value={`${rule.property}`}
-                                        placeholder={rule.operator && rule.operator === 'PERCENTAGE_SPLIT' ? 'Trait (N/A)' : 'Trait *'}
+                                        placeholder={operator && operator === 'PERCENTAGE_SPLIT' ? 'Trait (N/A)' : 'Trait *'}
                                         onChange={e => this.setRuleProperty(i, 'property', { value: Utils.safeParseEventValue(e) })}
-                                        disabled={rule.operator && rule.operator === 'PERCENTAGE_SPLIT'}
+                                        disabled={operator && operator === 'PERCENTAGE_SPLIT'}
                                       />
                                     )}
                                   place="top"
@@ -44,10 +56,10 @@ export default class Rule extends PureComponent {
                                 </Tooltip>
                             </Flex>
                             <Flex value={30} className="px-1 text-center">
-                                {this.props.readOnly ? _.find(operators, { value: rule.operator }).label : (
+                                {this.props.readOnly ? _.find(operators, { value: operator }).label : (
                                     <Select
                                       data-test={`${this.props['data-test']}-operator-${i}`}
-                                      value={rule.operator && _.find(operators, { value: rule.operator })}
+                                      value={operator && _.find(operators, { value: operator })}
                                       onChange={value => this.setRuleProperty(i, 'operator', value)}
                                       options={operators}
                                     />
@@ -58,18 +70,39 @@ export default class Rule extends PureComponent {
                                   readOnly={this.props.readOnly}
                                   data-test={`${this.props['data-test']}-value-${i}`}
                                   className="input-container--flat full-width"
-                                  value={`${rule.value}`}
-                                  placeholder="Value *"
-                                  onChange={e => this.setRuleProperty(i, 'value', { value: Utils.getTypedValue(Utils.safeParseEventValue(e), true) })}
-                                  isValid={rule.value && this.validateRule(rule)}
+                                  value={value || ''}
+                                  placeholder={valuePlaceholder}
+                                  disabled={operatorObj && operatorObj.hideValue}
+                                  onChange={(e) => {
+                                      const value = Utils.getTypedValue(Utils.safeParseEventValue(e));
+                                      this.setRuleProperty(i, 'value', { value: operatorObj && operatorObj.append ? `${value}${operatorObj.append}` : value }, true);
+                                  }}
+                                  isValid={Utils.validateRule(rule)}
                                 />
                             </Flex>
                         </Row>
+                        {this.props.showDescription && (
+                            <Row noWrap className="rule">
+                                <textarea
+                                    readOnly={this.props.readOnly}
+                                    data-test={`${this.props['data-test']}-description-${i}`}
+                                    className="full-width borderless"
+                                    value={`${rule.description||""}`}
+                                    placeholder= "Condition description (Optional)"
+                                    onChange={(e) => {
+                                        const value = Utils.safeParseEventValue(e);
+                                        this.setRuleProperty(i, 'description', {value}, true);
+                                    }}
+                                />
+                            </Row>
+                        )}
+
                     </Flex>
                     <div>
                         <Row noWrap>
                             {isLastRule && !this.props.readOnly ? (
                                 <ButtonOutline
+                                    className="ml-2"
                                   data-test={`${this.props['data-test']}-or`}
                                   type="button" onClick={this.addRule}
 
@@ -97,54 +130,70 @@ export default class Rule extends PureComponent {
             </div>
         );
     }
-
     removeRule = (i) => {
-        const { props: { rule: { conditions: rules } } } = this;
-
-        if (rules.length === 1) {
-            this.props.onRemove();
-        } else {
-            rules.splice(i, 1);
-            this.props.onChange(this.props.rule);
-        }
+        this.setRuleProperty(i, "delete", {value:true})
     }
 
     setRuleProperty = (i, prop, { value }) => {
-        const { props: { rule: { conditions: rules } } } = this;
-        rules[i][prop] = Utils.getTypedValue(value,true);
+        const rule = cloneDeep(this.props.rule);
+
+        const { conditions: rules   } = rule;
+
+        const prevOperator = Utils.findOperator(rules[i].operator, rules[i].value, this.props.operators);
+        const newOperator = prop !== 'operator' ? prevOperator : this.props.operators.find(v => v.value === value);
+
+        if (newOperator && newOperator.hideValue) {
+            rules[i].value = null;
+        }
+        if ((prevOperator && prevOperator.append) !== (newOperator && newOperator.append)) {
+            rules[i].value = splitIfValue(rules[i].value, prevOperator && prevOperator.append)[0] + (newOperator.append || '');
+        }
+
+        // remove append if one was added
+
+
+        const formattedValue = value === null ? null : `${value}`;
+        const invalidPercentageSplit = prop === "value" && rules[i].operator === "PERCENTAGE_SPLIT" && (`${value}`?.match(/\D/) || value > 100);
+        if (!invalidPercentageSplit) {
+            // split operator by append
+            rules[i][prop] = prop === 'operator' ? formattedValue.split(':')[0] : formattedValue;
+        }
+
         if (prop === 'operator' && value === 'PERCENTAGE_SPLIT') {
             rules[i].property = '';
+            rules[i].value = '';
         }
-        this.props.onChange(this.props.rule);
+
+        if(!rule.conditions.filter((condition)=>!condition.delete).length) {
+            rule.delete = true
+        }
+
+        if(!rule.conditions.filter((condition)=>!condition.delete).length) {
+            rule.delete = true
+        }
+
+        this.props.onChange(rule);
     }
 
     addRule = () => {
         const { props: { rule: { conditions: rules } } } = this;
-        this.props.rule.conditions = rules.concat([{ ...Constants.defaultRule }]);
-        this.props.onChange(this.props.rule);
+        this.props.onChange({
+            ...this.props.rule,
+            conditions: rules.concat([{ ...Constants.defaultRule }])
+        });
     };
 
-    validateRule = (rule) => {
-        switch (rule.operator) {
-            case 'PERCENTAGE_SPLIT': {
-                const value = parseFloat(rule.value);
-                return value && value >= 0 && value <= 100;
-            }
-            default:
-                return true;
-        }
-    }
 
     render() {
         const { props: { rule: { conditions: rules } } } = this;
         return (
-            <FormGroup>
-                <div className="panel overflow-visible">
+            <div>
+                <div className="panel panel-without-heading overflow-visible">
                     <div className="panel-content">
                         {rules.map(this.renderRule)}
                     </div>
                 </div>
-            </FormGroup>
+            </div>
         );
     }
 }

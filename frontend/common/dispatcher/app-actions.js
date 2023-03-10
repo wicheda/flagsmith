@@ -1,3 +1,5 @@
+const Dispatcher = require('../dispatcher/dispatcher');
+
 const AppActions = Object.assign({}, require('./base/_app-actions'), {
     getOrganisation(organisationId) {
         Dispatcher.handleViewAction({
@@ -12,12 +14,37 @@ const AppActions = Object.assign({}, require('./base/_app-actions'), {
             data,
         });
     },
-    getFeatures(projectId, environmentId, force) {
+    refreshFeatures(projectId, environmentId) {
+        Dispatcher.handleViewAction({
+            actionType: Actions.REFRESH_FEATURES,
+            projectId,
+            environmentId,
+        });
+    },
+    getFeatures(projectId, environmentId, force, search, sort, page, filter, pageSize) {
         Dispatcher.handleViewAction({
             actionType: Actions.GET_FLAGS,
             projectId,
             environmentId,
             force,
+            search,
+            sort,
+            page,
+            filter,
+            pageSize,
+        });
+    },
+    searchFeatures(projectId, environmentId, force, search, sort, page, filter, pageSize) {
+        Dispatcher.handleViewAction({
+            actionType: Actions.SEARCH_FLAGS,
+            projectId,
+            environmentId,
+            force,
+            search,
+            sort,
+            page,
+            filter,
+            pageSize,
         });
     },
     createProject(name) {
@@ -26,7 +53,6 @@ const AppActions = Object.assign({}, require('./base/_app-actions'), {
             name,
         });
     },
-
     getGroupsPage(orgId, page) {
         Dispatcher.handleViewAction({
             actionType: Actions.GET_GROUPS_PAGE,
@@ -34,38 +60,10 @@ const AppActions = Object.assign({}, require('./base/_app-actions'), {
             page,
         });
     },
-
-    getTags(projectId) {
+    migrateProject(projectId) {
         Dispatcher.handleViewAction({
-            actionType: Actions.GET_TAGS,
+            actionType: Actions.MIGRATE_PROJECT,
             projectId,
-        });
-    },
-
-    updateTag(projectId, data, onComplete) {
-        Dispatcher.handleViewAction({
-            actionType: Actions.UPDATE_TAG,
-            projectId,
-            data,
-            onComplete,
-        });
-    },
-
-    createTag(projectId, data, onComplete) {
-        Dispatcher.handleViewAction({
-            actionType: Actions.CREATE_TAG,
-            projectId,
-            data,
-            onComplete,
-        });
-    },
-
-    deleteTag(projectId, data, onComplete) {
-        Dispatcher.handleViewAction({
-            actionType: Actions.DELETE_TAG,
-            projectId,
-            data,
-            onComplete,
         });
     },
 
@@ -96,27 +94,9 @@ const AppActions = Object.assign({}, require('./base/_app-actions'), {
             orgId,
         });
     },
-    getPermissions(id, level) {
-        Dispatcher.handleViewAction({
-            actionType: Actions.GET_PERMISSIONS,
-            id,
-            level,
-        });
-    },
-    getAvailablePermissions() {
-        Dispatcher.handleViewAction({
-            actionType: Actions.GET_AVAILABLE_PERMISSIONS,
-        });
-    },
     getProject(projectId) {
         Dispatcher.handleViewAction({
             actionType: Actions.GET_PROJECT,
-            projectId,
-        });
-    },
-    getConfig(projectId) {
-        Dispatcher.handleViewAction({
-            actionType: Actions.GET_CONFIG,
             projectId,
         });
     },
@@ -126,11 +106,12 @@ const AppActions = Object.assign({}, require('./base/_app-actions'), {
             ...data,
         });
     },
-    createEnv(name, projectId, cloneId) {
+    createEnv(name, projectId, cloneId, description) {
         Dispatcher.handleViewAction({
             actionType: Actions.CREATE_ENV,
             name,
             projectId,
+            description,
             cloneId,
         });
     },
@@ -170,7 +151,7 @@ const AppActions = Object.assign({}, require('./base/_app-actions'), {
             segmentOverrides,
         });
     },
-    editEnvironmentFlag(projectId, environmentId, flag, projectFlag, environmentFlag, segmentOverrides) {
+    editEnvironmentFlag(projectId, environmentId, flag, projectFlag, environmentFlag, segmentOverrides, mode, onComplete) {
         Dispatcher.handleViewAction({
             actionType: Actions.EDIT_ENVIRONMENT_FLAG,
             projectId,
@@ -179,17 +160,42 @@ const AppActions = Object.assign({}, require('./base/_app-actions'), {
             projectFlag,
             environmentFlag,
             segmentOverrides,
+            mode,
+            onComplete,
+        });
+    },
+    editEnvironmentFlagChangeRequest(projectId, environmentId, flag, projectFlag, environmentFlag, segmentOverrides, changeRequest, commit) {
+        Dispatcher.handleViewAction({
+            actionType: Actions.EDIT_ENVIRONMENT_FLAG_CHANGE_REQUEST,
+            projectId,
+            environmentId,
+            flag,
+            projectFlag,
+            environmentFlag,
+            changeRequest,
+            segmentOverrides,
+            commit,
         });
     },
 
-    editFlag(projectId, flag, onComplete) {
+    editFeature(projectId, flag, onComplete) {
         Dispatcher.handleViewAction({
-            actionType: Actions.EDIT_FLAG,
+            actionType: Actions.EDIT_FEATURE,
             projectId,
             flag,
             onComplete,
         });
     },
+
+    editFeatureMv(projectId, flag, onComplete) {
+        Dispatcher.handleViewAction({
+            actionType: Actions.EDIT_FEATURE_MV,
+            projectId,
+            flag,
+            onComplete,
+        });
+    },
+
     editProject(id, project) {
         Dispatcher.handleViewAction({
             actionType: Actions.EDIT_PROJECT,
@@ -223,13 +229,14 @@ const AppActions = Object.assign({}, require('./base/_app-actions'), {
             name,
         });
     },
-    toggleFlag(index, environments, comment, environmentFlags) {
+    toggleFlag(index, environments, comment, environmentFlags, projectFlags) {
         Dispatcher.handleViewAction({
             actionType: Actions.TOGGLE_FLAG,
             index,
             environments,
             comment,
             environmentFlags,
+            projectFlags,
         });
     },
     editUserFlag(params) {
@@ -286,20 +293,6 @@ const AppActions = Object.assign({}, require('./base/_app-actions'), {
             onError,
         });
     },
-    getIdentities(envId, pageSize) {
-        Dispatcher.handleViewAction({
-            actionType: Actions.GET_IDENTITIES,
-            envId,
-            pageSize,
-        });
-    },
-    getIdentitiesPage(envId, page) {
-        Dispatcher.handleViewAction({
-            actionType: Actions.GET_IDENTITIES_PAGE,
-            envId,
-            page,
-        });
-    },
     getIdentity(envId, id) {
         Dispatcher.handleViewAction({
             actionType: Actions.GET_IDENTITY,
@@ -312,19 +305,6 @@ const AppActions = Object.assign({}, require('./base/_app-actions'), {
             actionType: Actions.GET_IDENTITY_SEGMENTS,
             projectId,
             id,
-        });
-    },
-    getIdentitySegmentsPage(page) {
-        Dispatcher.handleViewAction({
-            actionType: Actions.GET_IDENTITY_SEGMENTS_PAGE,
-            page,
-        });
-    },
-    saveIdentity(id, identity) {
-        Dispatcher.handleViewAction({
-            actionType: Actions.SAVE_IDENTITY,
-            id,
-            identity,
         });
     },
     createOrganisation(name) {
@@ -351,11 +331,16 @@ const AppActions = Object.assign({}, require('./base/_app-actions'), {
             actionType: Actions.DELETE_ORGANISATION,
         });
     },
-    // Invites todo: organise actions
     inviteUsers(invites) {
         Dispatcher.handleViewAction({
             actionType: Actions.INVITE_USERS,
             invites,
+        });
+    },
+    invalidateInviteLink(link) {
+        Dispatcher.handleViewAction({
+            actionType: Actions.INVALIDATE_INVITE_LINK,
+            link,
         });
     },
     deleteInvite(id) {
@@ -373,76 +358,6 @@ const AppActions = Object.assign({}, require('./base/_app-actions'), {
     resendInvite(id) {
         Dispatcher.handleViewAction({
             actionType: Actions.RESEND_INVITE,
-            id,
-        });
-    },
-    // Segments
-    selectEnvironment(data) {
-        Dispatcher.handleViewAction({
-            actionType: Actions.SELECT_ENVIRONMENT,
-            data,
-        });
-    },
-    getSegments(projectId, environmentId) {
-        Dispatcher.handleViewAction({
-            actionType: Actions.GET_SEGMENTS,
-            projectId,
-            environmentId,
-        });
-    },
-    createSegment(projectId, segment) {
-        Dispatcher.handleViewAction({
-            actionType: Actions.CREATE_SEGMENT,
-            projectId,
-            data: segment,
-        });
-    },
-    editSegment(projectId, segment) {
-        Dispatcher.handleViewAction({
-            actionType: Actions.EDIT_SEGMENT,
-            projectId,
-            data: segment,
-        });
-    },
-    removeSegment(projectId, id) {
-        Dispatcher.handleViewAction({
-            actionType: Actions.REMOVE_SEGMENT,
-            projectId,
-            id,
-        });
-    },
-    searchIdentities(envId, search, pageSize) {
-        Dispatcher.handleViewAction({
-            actionType: Actions.SEARCH_IDENTITIES,
-            envId,
-            search,
-            pageSize,
-        });
-    },
-    getAuditLog(projectId, search) {
-        Dispatcher.handleViewAction({
-            actionType: Actions.GET_AUDIT_LOG,
-            projectId,
-            search
-        });
-    },
-    getAuditLogPage(projectId, page) {
-        Dispatcher.handleViewAction({
-            projectId,
-            actionType: Actions.GET_AUDIT_LOG_PAGE,
-            page,
-        });
-    },
-    searchAuditLog(search) {
-        Dispatcher.handleViewAction({
-            actionType: Actions.SEARCH_AUDIT_LOG,
-            search,
-        });
-    },
-    deleteIdentity(envId, id) {
-        Dispatcher.handleViewAction({
-            actionType: Actions.DELETE_IDENTITY,
-            envId,
             id,
         });
     },
@@ -467,10 +382,42 @@ const AppActions = Object.assign({}, require('./base/_app-actions'), {
             hostedPageId,
         });
     },
-    getInfluxData(organisationId) {
+    getChangeRequests(environment, data, page) {
         Dispatcher.handleViewAction({
-            actionType: Actions.GET_INFLUX_DATA,
-            id: organisationId,
+            actionType: Actions.GET_CHANGE_REQUESTS,
+            environment,
+            committed: data.committed,
+            live_from_after: data.live_from_after,
+            page,
+        });
+    },
+    getChangeRequest(id, projectId, environmentId) {
+        Dispatcher.handleViewAction({
+            actionType: Actions.GET_CHANGE_REQUEST,
+            id,
+            projectId,
+            environmentId,
+        });
+    },
+    updateChangeRequest(changeRequest) {
+        Dispatcher.handleViewAction({
+            actionType: Actions.UPDATE_CHANGE_REQUEST,
+            changeRequest,
+        });
+    },
+    deleteChangeRequest(id, cb) {
+        Dispatcher.handleViewAction({
+            actionType: Actions.DELETE_CHANGE_REQUEST,
+            id,
+            cb,
+        });
+    },
+    actionChangeRequest(id, action, cb) {
+        Dispatcher.handleViewAction({
+            actionType: Actions.ACTION_CHANGE_REQUEST,
+            id,
+            action,
+            cb,
         });
     },
 });

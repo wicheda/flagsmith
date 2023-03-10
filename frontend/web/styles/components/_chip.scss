@@ -13,7 +13,7 @@
 	padding: 5px 10px;
 	border-radius: 16px;
 	margin-right: $input-padding-x;
-	font-size: 0.75em;
+	font-size: 12px;
 	font-weight: bold;
 	color: #777;
 	.chip-icon {
@@ -39,5 +39,19 @@
 	}
 	&.light {
 		color: white;
+	}
+	&--sm {
+		display: flex;
+		justify-content: center;
+		align-items: center;
+		border-radius: 16px;
+		font-size: 11px;
+		padding: 3px 8px;
+		margin-right: 5px;
+		.chip-svg-icon {
+			display: block;
+			width: 12px;
+			margin-right: 5px;
+		}
 	}
 }

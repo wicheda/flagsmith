@@ -6,6 +6,9 @@
     "containerDefinitions": [
         {
             "name": "flagsmith-api",
+            "command": [
+                "serve"
+            ],
             "cpu": 0,
             "portMappings": [
                 {
@@ -81,6 +84,10 @@
                     "value": "15"
                 },
                 {
+                    "name": "GUNICORN_KEEP_ALIVE",
+                    "value": "60"
+                },
+                {
                     "name": "IDENTITIES_TABLE_NAME_DYNAMO",
                     "value": "flagsmith_identities"
                 },
@@ -114,15 +121,51 @@
                 },
                 {
                     "name": "SENDER_EMAIL",
-                    "value": "support@flagsmith.com"
+                    "value": "Flagsmith <support@flagsmith.com>"
                 },
                 {
                     "name": "SENTRY_TRACE_SAMPLE_RATE",
-                    "value": "0.0005"
+                    "value": "0.0001"
+                },
+                {
+                    "name": "DASHBOARD_ENDPOINTS_SENTRY_TRACE_SAMPLE_RATE",
+                    "value": "0.02"
                 },
                 {
                     "name": "SLACK_CLIENT_ID",
                     "value": "937916178726.1924685747446"
+                },
+                {
+                    "name": "EDGE_API_URL",
+                    "value": "https://edge.api.flagsmith.com/api/v1/"
+                },
+                {
+                    "name": "IDENTITY_MIGRATION_EVENT_BUS_NAME",
+                    "value": "identity_migration-d46ed1a"
+                },
+                {
+                    "name": "ENVIRONMENTS_API_KEY_TABLE_NAME_DYNAMO",
+                    "value": "flagsmith_environment_api_key"
+                },
+                {
+                    "name": "EDGE_RELEASE_DATETIME",
+                    "value": "2022-06-07T10:00:00Z"
+                },
+                {
+                    "name": "CACHE_ENVIRONMENT_DOCUMENT_SECONDS",
+                    "value": "60"
+                },
+                {
+                    "name": "TASK_RUN_METHOD",
+                    "value": "TASK_PROCESSOR"
+                },
+                {
+                    "name": "SSE_SERVER_BASE_URL",
+                    "value": "https://origin.realtime.flagsmith.com"
+                },
+                {
+                    "name": "ENABLE_PIPEDRIVE_LEAD_TRACKING",
+                    "value": "True"
                 }
             ],
             "secrets": [
@@ -173,6 +216,14 @@
                 {
                     "name": "SLACK_CLIENT_SECRET",
                     "valueFrom": "arn:aws:secretsmanager:eu-west-2:084060095745:secret:ECS-API-LxUiIQ:SLACK_CLIENT_SECRET::"
+                },
+                {
+                    "name": "EDGE_REQUEST_SIGNING_KEY",
+                    "valueFrom": "arn:aws:secretsmanager:eu-west-2:084060095745:secret:ECS-API-LxUiIQ:EDGE_REQUEST_SIGNING_KEY::"
+                },
+                {
+                    "name": "SSE_AUTHENTICATION_TOKEN",
+                    "valueFrom": "arn:aws:secretsmanager:eu-west-2:084060095745:secret:ECS-API-LxUiIQ:SSE_AUTHENTICATION_TOKEN::"
                 }
             ],
             "logConfiguration": {

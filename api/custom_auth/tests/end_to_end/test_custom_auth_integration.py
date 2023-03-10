@@ -1,13 +1,14 @@
+import json
 import re
-import time
 from collections import ChainMap
 
 import pyotp
 from django.conf import settings
 from django.core import mail
+from django.core.cache import cache
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.test import APITestCase, override_settings
+from rest_framework.test import APIClient, APITestCase, override_settings
 
 from organisations.invites.models import Invite
 from organisations.models import Organisation
@@ -23,6 +24,7 @@ class AuthIntegrationTestCase(APITestCase):
 
     def tearDown(self) -> None:
         FFAdminUser.objects.all().delete()
+        cache.clear()
 
     def test_register_and_login_workflows(self):
         # try to register without first_name / last_name
@@ -43,8 +45,6 @@ class AuthIntegrationTestCase(APITestCase):
         assert register_response_success.status_code == status.HTTP_201_CREATED
         assert register_response_success.json()["key"]
 
-        # add delay to avoid HTTP_429 as we have throttle in place for login
-        time.sleep(1)
         # now verify we can login with the same credentials
         new_login_data = {
             "email": self.test_email,
@@ -87,8 +87,6 @@ class AuthIntegrationTestCase(APITestCase):
         )
         assert reset_password_confirm_response.status_code == status.HTTP_204_NO_CONTENT
 
-        # add delay to avoid HTTP_429 as we have throttle in place for login
-        time.sleep(1)
         # now check we can login with the new details
         new_login_data = {
             "email": self.test_email,
@@ -169,8 +167,6 @@ class AuthIntegrationTestCase(APITestCase):
         self.assertFalse(new_user.is_active)
 
         # And login should fail as we have not activated account yet
-        # add delay to avoid HTTP_429 as we have throttle in place for login
-        time.sleep(1)
         login_data = {
             "email": self.test_email,
             "password": self.password,
@@ -197,7 +193,6 @@ class AuthIntegrationTestCase(APITestCase):
             activate_url, data=activate_data, status_code=status.HTTP_204_NO_CONTENT
         )
 
-        time.sleep(1)
         # And login success
         login_result = self.client.post(login_url, data=login_data)
         assert login_result.status_code == status.HTTP_200_OK
@@ -283,9 +278,6 @@ class AuthIntegrationTestCase(APITestCase):
         assert register_response.status_code == status.HTTP_201_CREATED
         assert register_response.json()["key"]
 
-        # since we're hitting login in other tests we need to ensure that the
-        # first login request doesn't fail with HTTP_429
-        time.sleep(1)
         # verify we can login with credentials
         login_data = {
             "email": self.test_email,
@@ -299,3 +291,88 @@ class AuthIntegrationTestCase(APITestCase):
         # try login in again, should deny, current limit 1 per second
         login_response = self.client.post(login_url, data=login_data)
         assert login_response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
+def test_throttle_signup(api_client, settings, user_password, db, reset_cache):
+    # verify that a throttle rate exists already then set it
+    # to something easier to reliably test
+    assert settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["signup"]
+    settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["signup"] = "1/min"
+    # Next, let's hit signup for the first time
+    register_data = {
+        "email": "user_1_email@mail.com",
+        "password": user_password,
+        "re_password": user_password,
+        "first_name": "user_1",
+        "last_name": "user_1_last_name",
+    }
+    register_url = reverse("api-v1:custom_auth:ffadminuser-list")
+    register_response = api_client.post(register_url, data=register_data)
+
+    # Assert that signup worked
+    assert register_response.status_code == status.HTTP_201_CREATED
+    assert register_response.json()["key"]
+
+    # Now, let's signup again
+    register_url = reverse("api-v1:custom_auth:ffadminuser-list")
+    response = api_client.post(register_url, data=register_data)
+
+    # Assert that we got throttled
+    assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
+def test_get_user_is_not_throttled(admin_client, settings, reset_cache):
+    # Given
+    settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["signup"] = "1/min"
+    url = reverse("api-v1:custom_auth:ffadminuser-me")
+    # When
+    for _ in range(2):
+        response = admin_client.get(url)
+        # Then
+        assert response.status_code == status.HTTP_200_OK
+
+
+def test_delete_token(test_user, auth_token):
+    # Given
+    url = reverse("api-v1:custom_auth:delete-token")
+    client = APIClient(HTTP_AUTHORIZATION=f"Token {auth_token.key}")
+
+    # When
+    response = client.delete(url)
+
+    # Then
+    assert response.status_code == status.HTTP_204_NO_CONTENT
+
+    # and - if we try to delete the token again(i.e: access anything that uses is_authenticated)
+    # we should will get 401
+    assert client.delete(url).status_code == status.HTTP_401_UNAUTHORIZED
+
+
+def test_register_with_sign_up_type(client, db, settings):
+    # Given
+    password = FFAdminUser.objects.make_random_password()
+    sign_up_type = "NO_INVITE"
+    email = "test@example.com"
+    register_data = {
+        "email": email,
+        "password": password,
+        "re_password": password,
+        "first_name": "test",
+        "last_name": "tester",
+        "sign_up_type": sign_up_type,
+    }
+
+    # When
+    response = client.post(
+        reverse("api-v1:custom_auth:ffadminuser-list"),
+        data=json.dumps(register_data),
+        content_type="application/json",
+    )
+
+    # Then
+    assert response.status_code == status.HTTP_201_CREATED
+
+    response_json = response.json()
+    assert response_json["sign_up_type"] == sign_up_type
+
+    assert FFAdminUser.objects.filter(email=email, sign_up_type=sign_up_type).exists()

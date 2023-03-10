@@ -17,7 +17,7 @@ from webhooks.sample_webhook_data import (
     organisation_webhook_data,
 )
 
-from .models import AbstractBaseWebhookModel
+from .models import AbstractBaseExportableWebhookModel
 from .serializers import WebhookSerializer
 
 if typing.TYPE_CHECKING:
@@ -51,6 +51,9 @@ def get_webhook_model(webhook_type: WebhookType) -> typing.Union[WebhookModels]:
 
 
 def call_environment_webhooks(environment, data, event_type):
+    if settings.DISABLE_WEBHOOKS:
+        return
+
     _call_webhooks(
         environment.webhooks.filter(enabled=True),
         data,
@@ -60,6 +63,9 @@ def call_environment_webhooks(environment, data, event_type):
 
 
 def call_organisation_webhooks(organisation, data, event_type):
+    if settings.DISABLE_WEBHOOKS:
+        return
+
     _call_webhooks(
         organisation.webhooks.filter(enabled=True),
         data,
@@ -73,7 +79,7 @@ def call_integration_webhook(config, data):
 
 
 def trigger_sample_webhook(
-    webhook: typing.Type[AbstractBaseWebhookModel], webhook_type: WebhookType
+    webhook: typing.Type[AbstractBaseExportableWebhookModel], webhook_type: WebhookType
 ) -> requests.models.Response:
     data = WEBHOOK_SAMPLE_DATA.get(webhook_type)
     serializer = WebhookSerializer(data=data)
@@ -83,7 +89,7 @@ def trigger_sample_webhook(
 
 
 def _call_webhook(
-    webhook: typing.Type[AbstractBaseWebhookModel],
+    webhook: typing.Type[AbstractBaseExportableWebhookModel],
     data: typing.Mapping,
 ) -> requests.models.Response:
     headers = {"content-type": "application/json"}

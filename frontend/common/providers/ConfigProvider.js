@@ -1,9 +1,14 @@
 import React, { Component } from 'react';
 import flagsmith from 'flagsmith';
-import ConfigStore from '../stores/config-store';
+import propTypes from 'prop-types';
+import ConfigStore from 'common/stores/config-store';
 
-module.exports = (WrappedComponent) => {
+export default (WrappedComponent) => {
     class HOC extends Component {
+        static contextTypes = {
+            router: propTypes.object.isRequired,
+        };
+
         constructor(props) {
             super(props);
             this.state = {
@@ -23,7 +28,7 @@ module.exports = (WrappedComponent) => {
         }
 
         render() {
-            const { isLoading,error } = this.state;
+            const { isLoading, error } = this.state;
             const { getValue, hasFeature } = flagsmith;
 
 
@@ -32,6 +37,7 @@ module.exports = (WrappedComponent) => {
                   ref="wrappedComponent"
                   isLoading={isLoading}
                   error={error}
+                  router={this.context.router}
                   {...this.props}
                   getValue={getValue}
                   hasFeature={hasFeature}

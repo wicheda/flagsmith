@@ -21,9 +21,8 @@ def test_audit_log_can_be_filtered_by_environments(admin_client, project, enviro
     )
     # Then
     assert response.status_code == status.HTTP_200_OK
-    assert response.json()["count"] == 2
+    assert response.json()["count"] == 1
     assert response.json()["results"][0]["environment"]["id"] == audit_env.id
-    assert response.json()["results"][1]["environment"] is None
 
 
 def test_audit_log_can_be_filtered_by_log_text(admin_client, project, environment):
@@ -56,7 +55,7 @@ def test_audit_log_can_be_filtered_by_project(
     )
     AuditLog.objects.create(project=project)
     AuditLog.objects.create(project=project, environment=environment)
-    AuditLog.objects.create(project=another_project, environment=environment)
+    AuditLog.objects.create(project=another_project)
 
     url = reverse("api-v1:audit-list")
 
@@ -68,3 +67,23 @@ def test_audit_log_can_be_filtered_by_project(
     assert response.status_code == status.HTTP_200_OK
     assert response.json()["results"][0]["project"]["id"] == project.id
     assert response.json()["results"][1]["project"]["id"] == project.id
+
+
+def test_audit_log_can_be_filtered_by_is_system_event(
+    admin_client, project, environment, organisation
+):
+    # Given
+    AuditLog.objects.create(project=project, is_system_event=True)
+    AuditLog.objects.create(
+        project=project, environment=environment, is_system_event=False
+    )
+
+    url = reverse("api-v1:audit-list")
+
+    # When
+    response = admin_client.get(url, {"is_system_event": True})
+
+    # Then
+    assert response.json()["count"] == 1
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["results"][0]["is_system_event"] is True

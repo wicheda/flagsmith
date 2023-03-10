@@ -40,14 +40,13 @@
     }
 }
 .dark {
-
     .input-container {
         input.input {
             border: 1px solid $bt-input-border-dark !important;
             background-color: $input-bg-dark !important;
             color: $body-text-dark;
             &:focus {
-                border:1px solid $bt-input-border-active!important;
+                border:1px solid $bt-input-border-active;
             }
             &::placeholder{
                 color:$input-placeholder-color-dark !important;
@@ -58,13 +57,23 @@
 
 .input-container{
     height:$input-height;
+    &.invalid {
+        input.input {
+            border-color: $brand-danger !important;
+        }
+    }
+    &.success {
+        input.input {
+            border-color: $brand-success !important;
+        }
+    }
 
     input.input{
         border:1px solid $bt-input-border;
         background-color: $input-bg;
         @include transition(all 200ms);
         &:focus {
-            border:1px solid $bt-input-border-active!important;
+            border:1px solid $bt-input-border-active;
         }
         border-radius: $border-radius-default;
         color:$body-text;
@@ -95,7 +104,7 @@ label, .icon-primary {
         color: $header-color-dark;
     }
 }
-.hljs, .hljs-header {
+.hljs, .hljs-header, .value-editor pre {
     border-radius: $default-border-radius;
 }
 
@@ -145,3 +154,4 @@ label, .icon-primary {
     background-color: $bt-brand-primary;
     color: white;
 }
+

@@ -2,7 +2,7 @@ import pytest
 
 
 @pytest.fixture()
-def dynamo_wrapper_mock(mocker):
+def webhook_mock(mocker):
     return mocker.patch(
-        "environments.identities.models.Identity.dynamo_wrapper",
+        "edge_api.identities.serializers.call_environment_webhook_for_feature_state_change"
     )

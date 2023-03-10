@@ -7,15 +7,14 @@ import { BrowserRouter as Router } from 'react-router-dom';
 import { createBrowserHistory } from 'history';
 import ToastMessages from './project/toast';
 import routes from './routes';
+import Utils from 'common/utils/utils'
+import AccountStore from 'common/stores/account-store';
+import data from 'common/data/base/_data';
 
-import AccountStore from '../common/stores/account-store';
-import data from '../common/data/base/_data';
 
-
-window.Utils = require('../common/utils/utils');
-window.Constants = require('../common/constants');
-
+window.Utils = Utils;
 window.openModal = require('./project/modals').openModal;
+window.openModal2 = require('./project/modals').openModal2;
 window.openConfirm = require('./project/modals').openConfirm;
 
 const rootElement = document.getElementById('app');
@@ -74,6 +73,7 @@ setTimeout(() => {
       || document.location.pathname.indexOf('/invite') !== -1
       || document.location.pathname.indexOf('/projects') !== -1)
     && !AccountStore.getUser()) {
+        API.setRedirect(document.location.pathname + (document.location.search || ''));
         browserHistory.push(`/?redirect=${encodeURIComponent(document.location.pathname + (document.location.search || ''))}`);
     }
 
@@ -89,8 +89,8 @@ ReactDOM.render(<ToastMessages/>, document.getElementById('toast'));
 if (E2E) {
     document.body.classList.add('disable-transitions');
 }
-
-if (!E2E && Project.crispChat) {
+const isWidget = document.location.href.includes("/widget")
+if (!E2E && Project.crispChat && !isWidget) {
     window.$crisp = [];
     window.CRISP_WEBSITE_ID = Project.crispChat;
     (function () {
@@ -100,4 +100,13 @@ if (!E2E && Project.crispChat) {
         s.async = 1;
         d.getElementsByTagName('head')[0].appendChild(s);
     }());
+}
+
+if (!E2E && Project.zendesk && !isWidget) {
+    const script = document.createElement('script');
+    script.type = 'text/javascript';
+    script.id = 'ze-snippet';
+    script.async = true;
+    script.src = `https://static.zdassets.com/ekr/snippet.js?key=${Project.zendesk}`;
+    document.getElementsByTagName('head')[0].appendChild(script);
 }

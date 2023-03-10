@@ -1,6 +1,8 @@
 import React, { Component } from 'react';
 import Highlight from './Highlight';
 import PlayIcon from './svg/PlayIcon';
+import ConfigProvider from 'common/providers/ConfigProvider';
+import Constants from 'common/constants';
 
 const TryIt = class extends Component {
     static displayName = 'TryIt'
@@ -15,7 +17,7 @@ const TryIt = class extends Component {
         this.setState({ isLoading: true });
         API.trackEvent(Constants.events.TRY_IT);
 
-        const url = userId ? `${Project.api}identities/?identifier=${userId}` : `${Project.api}flags/`;
+        const url = userId ? `${Utils.getSDKEndpoint()}identities/?identifier=${encodeURIComponent(userId)}` : `${Utils.getSDKEndpoint()}flags/`;
         const options = {
             headers: { 'X-Environment-Key': environmentId },
         };
@@ -55,8 +57,7 @@ const TryIt = class extends Component {
     };
 
     render() {
-        const { hasFeature } = this.props;
-        return hasFeature('try_it') ? (
+        return Utils.getFlagsmithHasFeature('try_it') ? (
             <Panel
               icon="ion-md-code"
               title="Try it out"
@@ -78,11 +79,13 @@ const TryIt = class extends Component {
                         </div>
                     </div>
                     {this.state.data && (
-                        <div id="try-it-results">
+                        <div id={!this.state.isLoading && 'try-it-results'}>
                             <FormGroup/>
-                            <Highlight className="json">
-                                {this.state.data}
-                            </Highlight>
+                            <div style={{ opacity: this.state.isLoading ? 0.5 : 1 }} className="fade ">
+                                <Highlight forceExpanded className="json">
+                                    {this.state.data}
+                                </Highlight>
+                            </div>
                         </div>
                     )}
                     {this.state.isLoading && !this.state.data && (

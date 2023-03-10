@@ -1,25 +1,29 @@
-import base64
-import json
 import typing
 from collections import namedtuple
 
-import coreapi
-from boto3.dynamodb.conditions import Key
+from core.constants import FLAGSMITH_UPDATED_AT_HEADER
 from django.conf import settings
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page
+from drf_yasg2.utils import swagger_auto_schema
 from rest_framework import status, viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.schemas import AutoSchema
 
-from app.pagination import CustomPagination, EdgeIdentityPagination
+from app.pagination import CustomPagination
 from edge_api.identities.edge_request_forwarder import forward_identity_request
 from environments.identities.models import Identity
 from environments.identities.serializers import (
-    EdgeIdentitySerializer,
     IdentitySerializer,
+    SDKIdentitiesQuerySerializer,
+    SDKIdentitiesResponseSerializer,
 )
 from environments.identities.traits.serializers import TraitSerializerBasic
 from environments.models import Environment
+from environments.permissions.constants import (
+    MANAGE_IDENTITIES,
+    VIEW_IDENTITIES,
+)
 from environments.permissions.permissions import NestedEnvironmentPermissions
 from environments.sdk.serializers import (
     IdentifyWithTraitsSerializer,
@@ -30,79 +34,12 @@ from integrations.integration import (
     IDENTITY_INTEGRATIONS,
     identify_integrations,
 )
-from projects.exceptions import DynamoNotEnabledError
+from sse.decorators import generate_identity_update_message
 from util.views import SDKAPIView
-
-
-class EdgeIdentityViewSet(viewsets.ModelViewSet):
-    serializer_class = EdgeIdentitySerializer
-    permission_classes = [IsAuthenticated, NestedEnvironmentPermissions]
-    pagination_class = EdgeIdentityPagination
-    lookup_field = "identity_uuid"
-    dynamo_identifier_search_functions = {
-        "EQUAL": lambda identifier: Key("identifier").eq(identifier),
-        "BEGINS_WITH": lambda identifier: Key("identifier").begins_with(identifier),
-    }
-
-    def initial(self, request, *args, **kwargs):
-        environment = self.get_environment_from_request()
-        if not environment.project.enable_dynamo_db:
-            raise DynamoNotEnabledError()
-
-        super().initial(request, *args, **kwargs)
-
-    def _get_search_function_and_value(
-        self,
-        search_query: str,
-    ) -> typing.Tuple[typing.Callable, str]:
-        if search_query.startswith('"') and search_query.endswith('"'):
-            return self.dynamo_identifier_search_functions[
-                "EQUAL"
-            ], search_query.replace('"', "")
-        return self.dynamo_identifier_search_functions["BEGINS_WITH"], search_query
-
-    def get_object(self):
-        return Identity.dynamo_wrapper.get_item_from_uuid(
-            self.kwargs["environment_api_key"], self.kwargs["identity_uuid"]
-        )
-
-    def get_queryset(self):
-        page_size = self.pagination_class().get_page_size(self.request)
-        previous_last_evaluated_key = self.request.GET.get("last_evaluated_key")
-        search_query = self.request.query_params.get("q")
-        start_key = None
-        if previous_last_evaluated_key:
-            start_key = json.loads(base64.b64decode(previous_last_evaluated_key))
-
-        if not search_query:
-            return Identity.dynamo_wrapper.get_all_items(
-                self.kwargs["environment_api_key"], page_size, start_key
-            )
-        search_func, search_identifier = self._get_search_function_and_value(
-            search_query
-        )
-        identity_documents = Identity.dynamo_wrapper.search_items_with_identifier(
-            self.kwargs["environment_api_key"],
-            search_identifier,
-            search_func,
-            page_size,
-            start_key,
-        )
-        return identity_documents
-
-    def get_environment_from_request(self):
-        """
-        Get environment object from URL parameters in request.
-        """
-        return Environment.objects.get(api_key=self.kwargs["environment_api_key"])
-
-    def perform_destroy(self, instance):
-        Identity.dynamo_wrapper.delete_item(instance["composite_key"])
 
 
 class IdentityViewSet(viewsets.ModelViewSet):
     serializer_class = IdentitySerializer
-    permission_classes = [IsAuthenticated, NestedEnvironmentPermissions]
     pagination_class = CustomPagination
 
     def get_queryset(self):
@@ -125,6 +62,21 @@ class IdentityViewSet(viewsets.ModelViewSet):
         queryset = queryset.order_by("created_date")
 
         return queryset
+
+    def get_permissions(self):
+        return [
+            IsAuthenticated(),
+            NestedEnvironmentPermissions(
+                action_permission_map={
+                    "list": VIEW_IDENTITIES,
+                    "retrieve": VIEW_IDENTITIES,
+                    "create": MANAGE_IDENTITIES,
+                    "update": MANAGE_IDENTITIES,
+                    "partial_update": MANAGE_IDENTITIES,
+                    "destroy": MANAGE_IDENTITIES,
+                },
+            ),
+        ]
 
     def get_environment_from_request(self):
         """
@@ -151,21 +103,7 @@ class SDKIdentitiesDeprecated(SDKAPIView):
 
     serializer_class = IdentifyWithTraitsSerializer
 
-    schema = AutoSchema(
-        manual_fields=[
-            coreapi.Field(
-                "X-Environment-Key",
-                location="header",
-                description="API Key for an Environment",
-            ),
-            coreapi.Field(
-                "identifier",
-                location="path",
-                required=True,
-                description="Identity user identifier",
-            ),
-        ]
-    )
+    schema = None
 
     # identifier is in a path parameter
     def get(self, request, identifier, *args, **kwargs):
@@ -212,6 +150,17 @@ class SDKIdentities(SDKAPIView):
     serializer_class = IdentifyWithTraitsSerializer
     pagination_class = None  # set here to ensure documentation is correct
 
+    @swagger_auto_schema(
+        responses={200: SDKIdentitiesResponseSerializer()},
+        query_serializer=SDKIdentitiesQuerySerializer(),
+        operation_id="identify_user",
+    )
+    @method_decorator(
+        cache_page(
+            timeout=settings.GET_IDENTITIES_ENDPOINT_CACHE_SECONDS,
+            cache=settings.GET_IDENTITIES_ENDPOINT_CACHE_NAME,
+        )
+    )
     def get(self, request):
         identifier = request.query_params.get("identifier")
         if not identifier:
@@ -231,14 +180,35 @@ class SDKIdentities(SDKAPIView):
             .prefetch_related("identity_traits")
             .get_or_create(identifier=identifier, environment=request.environment)
         )
-        if settings.EDGE_API_URL:
-            forward_identity_request(request, request.environment.project.id)
+        if settings.EDGE_API_URL and request.environment.project.enable_dynamo_db:
+            forward_identity_request.delay(
+                args=(
+                    request.method,
+                    dict(request.headers),
+                    request.environment.project.id,
+                ),
+                kwargs={"query_params": request.GET.dict()},
+            )
+
+        # Note that we send the environment updated_at value here since it covers most use cases
+        # in which an identity will need updated flags. It will not cover identity overrides or
+        # adding traits to the identity (which adds / removes them to / from segments).
+        # TODO: handle identity overrides.
+        headers = {
+            FLAGSMITH_UPDATED_AT_HEADER: request.environment.updated_at.timestamp()
+        }
 
         feature_name = request.query_params.get("feature")
         if feature_name:
-            return self._get_single_feature_state_response(identity, feature_name)
+            response = self._get_single_feature_state_response(
+                identity, feature_name, headers=headers
+            )
         else:
-            return self._get_all_feature_states_for_user_response(identity)
+            response = self._get_all_feature_states_for_user_response(
+                identity, headers=headers
+            )
+
+        return response
 
     def get_serializer_context(self):
         context = super(SDKIdentities, self).get_serializer_context()
@@ -248,13 +218,30 @@ class SDKIdentities(SDKAPIView):
             context["environment"] = self.request.environment
         return context
 
+    @method_decorator(
+        generate_identity_update_message(
+            lambda req: (req.environment, req.data["identifier"])
+        )
+    )
+    @swagger_auto_schema(
+        request_body=IdentifyWithTraitsSerializer(),
+        responses={200: SDKIdentitiesResponseSerializer()},
+        operation_id="identify_user_with_traits",
+    )
     def post(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         instance = serializer.save()
 
-        if settings.EDGE_API_URL:
-            forward_identity_request(request, request.environment.project.id)
+        if settings.EDGE_API_URL and request.environment.project.enable_dynamo_db:
+            forward_identity_request.delay(
+                args=(
+                    request.method,
+                    dict(request.headers),
+                    request.environment.project.id,
+                ),
+                kwargs={"request_data": request.data},
+            )
 
         # we need to serialize the response again to ensure that the
         # trait values are serialized correctly
@@ -262,26 +249,36 @@ class SDKIdentities(SDKAPIView):
             instance=instance,
             context={"identity": instance.get("identity")},  # todo: improve this
         )
-        return Response(response_serializer.data)
+        return Response(
+            response_serializer.data,
+            headers={
+                FLAGSMITH_UPDATED_AT_HEADER: request.environment.updated_at.timestamp()
+            },
+        )
 
-    def _get_single_feature_state_response(self, identity, feature_name):
+    def _get_single_feature_state_response(
+        self, identity, feature_name, headers: typing.Dict[str, typing.Any]
+    ):
         for feature_state in identity.get_all_feature_states():
             if feature_state.feature.name == feature_name:
                 serializer = FeatureStateSerializerFull(
                     feature_state, context={"identity": identity}
                 )
-                return Response(data=serializer.data, status=status.HTTP_200_OK)
+                return Response(
+                    data=serializer.data, status=status.HTTP_200_OK, headers=headers
+                )
 
         return Response(
-            {"detail": "Given feature not found"}, status=status.HTTP_404_NOT_FOUND
+            {"detail": "Given feature not found"},
+            status=status.HTTP_404_NOT_FOUND,
+            headers=headers,
         )
 
-    def _get_all_feature_states_for_user_response(self, identity, trait_models=None):
+    def _get_all_feature_states_for_user_response(self, identity, headers):
         """
         Get all feature states for an identity
 
         :param identity: Identity model to return feature states for
-        :param trait_models: optional list of trait_models to pass in for organisations that don't persist them
         :return: Response containing lists of both serialized flags and traits
         """
         all_feature_states = identity.get_all_feature_states()
@@ -296,4 +293,4 @@ class SDKIdentities(SDKAPIView):
 
         response = {"flags": serialized_flags.data, "traits": serialized_traits.data}
 
-        return Response(data=response, status=status.HTTP_200_OK)
+        return Response(data=response, status=status.HTTP_200_OK, headers=headers)

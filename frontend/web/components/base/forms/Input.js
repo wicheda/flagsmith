@@ -24,7 +24,7 @@ const Input = class extends React.Component {
 
     constructor(props, context) {
         super(props, context);
-        this.state = { shouldValidate: false, type: this.props.type };
+        this.state = { shouldValidate: !!this.props.value || this.props.autoValidate, type: this.props.type };
     }
 
     onFocus = (e) => {
@@ -61,13 +61,16 @@ const Input = class extends React.Component {
     }
 
     render() {
-        const { isValid, onSearchChange, mask, placeholderChar, inputClassName, ...rest } = this.props;
+        const { isValid, showSuccess, onSearchChange, mask, placeholderChar, inputClassName, ...rest } = this.props;
 
+        const invalid = this.state.shouldValidate && !isValid;
+        const success = isValid && showSuccess;
         const className = cn({
             'input-container': true,
+            success,
             'password': this.props.type === 'password',
             'focused': this.state.isFocused,
-            'invalid': this.state.shouldValidate && !isValid,
+            invalid,
         }, this.props.className);
 
         const innerClassName = cn({
@@ -102,6 +105,12 @@ const Input = class extends React.Component {
                       className={innerClassName}
                     />
                 )}
+                {invalid && (
+                    <span className={`input-icon-right text-danger icon ion ion-ios-close-circle-outline`}/>
+                )}
+                {success && (
+                    <span className={`input-icon-right text-success icon ion ion-ios-checkmark-circle-outline`}/>
+                )}
                 {this.props.type === 'password' && (
                     <span onClick={() => this.setState({ type: this.state.type === 'password' ? 'text' : 'password' })} className={`input-icon-right icon ion ${this.state.type === 'text' ? 'ion-ios-eye-off' : 'ion-ios-eye'}`}/>
                 )}
@@ -128,4 +137,4 @@ Input.propTypes = {
     onSearchChange: OptionalFunc,
 };
 
-module.exports = Input;
+export default Input

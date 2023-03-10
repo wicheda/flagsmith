@@ -12,7 +12,9 @@ from rest_framework import status
 from rest_framework.test import APIClient, override_settings
 
 from environments.models import Environment
+from environments.permissions.models import UserEnvironmentPermission
 from features.models import Feature, FeatureSegment
+from organisations.chargebee.metadata import ChargebeeObjMetadata
 from organisations.invites.models import Invite
 from organisations.models import (
     Organisation,
@@ -22,7 +24,13 @@ from organisations.models import (
 )
 from organisations.permissions.models import UserOrganisationPermission
 from organisations.permissions.permissions import CREATE_PROJECT
-from projects.models import Project
+from organisations.subscriptions.constants import (
+    CHARGEBEE,
+    MAX_API_CALLS_IN_FREE_PLAN,
+    MAX_PROJECTS_IN_FREE_PLAN,
+    MAX_SEATS_IN_FREE_PLAN,
+)
+from projects.models import Project, UserProjectPermission
 from segments.models import Segment
 from users.models import FFAdminUser, UserPermissionGroup
 from util.tests import Helper
@@ -134,10 +142,7 @@ class OrganisationTestCase(TestCase):
         url = reverse(
             "api-v1:organisations:organisation-invite", args=[organisation.pk]
         )
-        data = {
-            "emails": ["test@example.com"],
-            "frontend_base_url": "https://example.com",
-        }
+        data = {"emails": ["test@example.com"]}
 
         # When
         response = self.client.post(
@@ -155,7 +160,7 @@ class OrganisationTestCase(TestCase):
         organisation = Organisation.objects.create(name="test org")
         self.user.add_organisation(organisation, OrganisationRole.ADMIN)
         email = "test_2@example.com"
-        data = {"emails": [email], "frontend_base_url": "https://example.com"}
+        data = {"emails": [email]}
         url = reverse(
             "api-v1:organisations:organisation-invite", args=[organisation.pk]
         )
@@ -184,15 +189,9 @@ class OrganisationTestCase(TestCase):
         self.user.add_organisation(organisation, OrganisationRole.ADMIN)
 
         invite_1 = Invite.objects.create(
-            email="test_1@example.com",
-            frontend_base_url="https://www.example.com",
-            organisation=organisation,
+            email="test_1@example.com", organisation=organisation
         )
-        Invite.objects.create(
-            email="test_2@example.com",
-            frontend_base_url="https://www.example.com",
-            organisation=organisation,
-        )
+        Invite.objects.create(email="test_2@example.com", organisation=organisation)
 
         # When
         invite_list_response = self.client.get(
@@ -237,6 +236,53 @@ class OrganisationTestCase(TestCase):
         # Test that other users are still part of the group
         assert group in self.user.permission_groups.all()
 
+    def test_remove_user_from_an_organisation_also_removes_users_environment_and_project_permission(
+        self,
+    ):
+        # Given
+        organisation = Organisation.objects.create(name="Test org")
+
+        self.user.add_organisation(organisation, OrganisationRole.ADMIN)
+        # Now, let's create a project
+        project_name = "org_remove_test"
+        project_create_url = reverse("api-v1:projects:project-list")
+        data = {"name": project_name, "organisation": organisation.id}
+
+        response = self.client.post(project_create_url, data=data)
+        project_id = response.json()["id"]
+
+        # Next, let's create an environment
+        url = reverse("api-v1:environments:environment-list")
+        data = {"name": "Test environment", "project": project_id}
+        response = self.client.post(url, data=data)
+        environment_id = response.json()["id"]
+
+        url = reverse(
+            "api-v1:organisations:organisation-remove-users", args=[organisation.pk]
+        )
+
+        data = [{"id": self.user.id}]
+
+        # Next, let's remove the user from the organisation
+        res = self.client.post(
+            url, data=json.dumps(data), content_type="application/json"
+        )
+
+        # Then
+        assert res.status_code == status.HTTP_200_OK
+        assert (
+            UserProjectPermission.objects.filter(
+                project__id=project_id, user=self.user
+            ).count()
+            == 0
+        )
+        assert (
+            UserEnvironmentPermission.objects.filter(
+                user=self.user, environment__id=environment_id
+            ).count()
+            == 0
+        )
+
     @override_settings()
     def test_can_invite_user_as_admin(self):
         # Given
@@ -250,8 +296,7 @@ class OrganisationTestCase(TestCase):
         invited_email = "test@example.com"
 
         data = {
-            "invites": [{"email": invited_email, "role": OrganisationRole.ADMIN.name}],
-            "frontend_base_url": "http://blah.com",
+            "invites": [{"email": invited_email, "role": OrganisationRole.ADMIN.name}]
         }
 
         # When
@@ -278,8 +323,7 @@ class OrganisationTestCase(TestCase):
         invited_email = "test@example.com"
 
         data = {
-            "invites": [{"email": invited_email, "role": OrganisationRole.USER.name}],
-            "frontend_base_url": "http://blah.com",
+            "invites": [{"email": invited_email, "role": OrganisationRole.USER.name}]
         }
 
         # When
@@ -318,15 +362,19 @@ class OrganisationTestCase(TestCase):
 
         influx_org = settings.INFLUXDB_ORG
         read_bucket = settings.INFLUXDB_BUCKET + "_downsampled_15m"
-        query = (
-            f'from(bucket:"{read_bucket}") '
-            f"|> range(start: -30d, stop: now()) "
-            f'|> filter(fn:(r) => r._measurement == "api_call")         '
-            f'|> filter(fn: (r) => r["_field"] == "request_count")         '
-            f'|> filter(fn: (r) => r["organisation_id"] == "{organisation.id}") '
-            f'|> drop(columns: ["organisation", "project", "project_id", '
-            f'"environment", "environment_id"])'
-            f"|> sum()"
+        expected_query = (
+            (
+                f'from(bucket:"{read_bucket}") '
+                f"|> range(start: -30d, stop: now()) "
+                f'|> filter(fn:(r) => r._measurement == "api_call")         '
+                f'|> filter(fn: (r) => r["_field"] == "request_count")         '
+                f'|> filter(fn: (r) => r["organisation_id"] == "{organisation.id}") '
+                f'|> drop(columns: ["organisation", "project", "project_id", '
+                f'"environment", "environment_id"])'
+                f"|> sum()"
+            )
+            .replace(" ", "")
+            .replace("\n", "")
         )
 
         # When
@@ -334,9 +382,11 @@ class OrganisationTestCase(TestCase):
 
         # Then
         assert response.status_code == status.HTTP_200_OK
-        mock_influxdb_client.query_api.return_value.query.assert_called_once_with(
-            org=influx_org, query=query
-        )
+        mock_influxdb_client.query_api.return_value.query.assert_called_once()
+
+        call = mock_influxdb_client.query_api.return_value.query.mock_calls[0]
+        assert call[2]["org"] == influx_org
+        assert call[2]["query"].replace(" ", "").replace("\n", "") == expected_query
 
     @override_settings(ENABLE_CHARGEBEE=True)
     @mock.patch("organisations.serializers.get_subscription_data_from_hosted_page")
@@ -420,9 +470,9 @@ class OrganisationTestCase(TestCase):
         organisation = Organisation.objects.create(name="Test organisation")
         self.user.add_organisation(organisation, OrganisationRole.ADMIN)
 
-        subscription = Subscription.objects.create(
-            subscription_id="sub-id", organisation=organisation
-        )
+        subscription = Subscription.objects.get(organisation=organisation)
+        subscription.subscription_id = "sub-id"
+        subscription.save()
 
         url = reverse(
             "api-v1:organisations:organisation-get-hosted-page-url-for-subscription-upgrade",
@@ -455,7 +505,7 @@ class OrganisationTestCase(TestCase):
 
         # Then
         assert response.status_code == status.HTTP_200_OK
-        assert len(response.json()) == 1
+        assert len(response.json()) == 2
 
     def test_get_my_permissions_for_non_admin(self):
         # Given
@@ -517,21 +567,27 @@ class ChargeBeeWebhookTestCase(TestCase):
         self.subscription_id = "subscription-id"
         self.old_plan_id = "old-plan-id"
         self.old_max_seats = 1
-        self.subscription = Subscription.objects.create(
+
+        Subscription.objects.filter(organisation=self.organisation).update(
             organisation=self.organisation,
             subscription_id=self.subscription_id,
             plan=self.old_plan_id,
             max_seats=self.old_max_seats,
         )
+        self.subscription = Subscription.objects.get(organisation=self.organisation)
 
-    @mock.patch("organisations.models.get_max_seats_for_plan")
-    def test_when_subscription_plan_is_changed_max_seats_updated(
-        self, mock_get_max_seats
+    @mock.patch("organisations.models.get_plan_meta_data")
+    def test_when_subscription_plan_is_changed_max_seats_and_max_api_calls_are_updated(
+        self, mock_get_plan_meta_data
     ):
         # Given
         new_plan_id = "new-plan-id"
         new_max_seats = 3
-        mock_get_max_seats.return_value = new_max_seats
+        new_max_api_calls = 100
+        mock_get_plan_meta_data.return_value = {
+            "seats": new_max_seats,
+            "api_calls": new_max_api_calls,
+        }
 
         data = {
             "content": {
@@ -555,9 +611,11 @@ class ChargeBeeWebhookTestCase(TestCase):
         self.subscription.refresh_from_db()
         assert self.subscription.plan == new_plan_id
         assert self.subscription.max_seats == new_max_seats
+        assert self.subscription.max_api_calls == new_max_api_calls
 
+    @mock.patch("organisations.models.cancel_chargebee_subscription")
     def test_when_subscription_is_set_to_non_renewing_then_cancellation_date_set_and_alert_sent(
-        self,
+        self, mocked_cancel_chargebee_subscription
     ):
         # Given
         cancellation_date = datetime.now(tz=UTC) + timedelta(days=1)
@@ -582,6 +640,7 @@ class ChargeBeeWebhookTestCase(TestCase):
 
         # and
         assert len(mail.outbox) == 1
+        mocked_cancel_chargebee_subscription.assert_not_called()
 
     def test_when_subscription_is_cancelled_then_cancellation_date_set_and_alert_sent(
         self,
@@ -728,3 +787,182 @@ class OrganisationWebhookViewSetTestCase(TestCase):
         assert response.status_code == status.HTTP_200_OK
         args, _ = trigger_sample_webhook.call_args
         assert args[0].url == self.valid_webhook_url
+
+
+def test_get_subscription_metadata(
+    mocker, organisation, admin_client, chargebee_subscription
+):
+    # Given
+    expected_seats = 10
+    expected_projects = 5
+    expected_api_calls = 100
+
+    get_subscription_metadata = mocker.patch(
+        "organisations.models.get_subscription_metadata",
+        return_value=ChargebeeObjMetadata(
+            seats=expected_seats,
+            projects=expected_projects,
+            api_calls=expected_api_calls,
+        ),
+    )
+
+    url = reverse(
+        "api-v1:organisations:organisation-get-subscription-metadata",
+        args=[organisation.pk],
+    )
+
+    # When
+    response = admin_client.get(url)
+
+    # Then
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json() == {
+        "max_seats": expected_seats,
+        "max_projects": expected_projects,
+        "max_api_calls": expected_api_calls,
+        "payment_source": CHARGEBEE,
+    }
+    get_subscription_metadata.assert_called_once_with(
+        chargebee_subscription.subscription_id
+    )
+
+
+def test_get_subscription_metadata_returns_404_if_the_organisation_have_no_subscription(
+    mocker, organisation, admin_client
+):
+    # Given
+    get_subscription_metadata = mocker.patch(
+        "organisations.models.get_subscription_metadata"
+    )
+
+    url = reverse(
+        "api-v1:organisations:organisation-get-subscription-metadata",
+        args=[organisation.pk],
+    )
+
+    # When
+    response = admin_client.get(url)
+
+    # Then
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+    get_subscription_metadata.assert_not_called()
+
+
+def test_get_subscription_metadata_returns_defaults_if_chargebee_error(
+    mocker, organisation, admin_client, chargebee_subscription
+):
+    # Given
+    get_subscription_metadata = mocker.patch(
+        "organisations.models.get_subscription_metadata"
+    )
+    get_subscription_metadata.return_value = None
+
+    url = reverse(
+        "api-v1:organisations:organisation-get-subscription-metadata",
+        args=[organisation.pk],
+    )
+
+    # When
+    response = admin_client.get(url)
+
+    # Then
+    assert response.status_code == status.HTTP_200_OK
+    get_subscription_metadata.assert_called_once_with(
+        chargebee_subscription.subscription_id
+    )
+    assert response.json() == {
+        "max_seats": MAX_SEATS_IN_FREE_PLAN,
+        "max_api_calls": MAX_API_CALLS_IN_FREE_PLAN,
+        "max_projects": MAX_PROJECTS_IN_FREE_PLAN,
+        "payment_source": None,
+    }
+
+
+def test_can_invite_user_with_permission_groups(
+    settings, admin_client, organisation, user_permission_group
+):
+    # Given
+    settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["invite"] = None
+
+    url = reverse("api-v1:organisations:organisation-invite", args=[organisation.pk])
+    invited_email = "test@example.com"
+
+    data = {
+        "invites": [
+            {
+                "email": invited_email,
+                "role": OrganisationRole.ADMIN.name,
+                "permission_groups": [user_permission_group.id],
+            }
+        ]
+    }
+
+    # When
+    response = admin_client.post(
+        url, data=json.dumps(data), content_type="application/json"
+    )
+
+    # Then
+    assert response.status_code == status.HTTP_201_CREATED
+    assert response.json()[0]["permission_groups"] == [user_permission_group.id]
+
+    # and
+    invite = Invite.objects.get(email=invited_email)
+    assert user_permission_group in invite.permission_groups.all()
+
+
+@pytest.mark.parametrize(
+    "query_string, expected_filter_args",
+    (
+        ("", {}),
+        ("project_id=1", {"project_id": 1}),
+        ("project_id=1&environment_id=1", {"project_id": 1, "environment_id": 1}),
+        ("environment_id=1", {"environment_id": 1}),
+    ),
+)
+def test_organisation_get_influx_data(
+    mocker, admin_client, organisation, query_string, expected_filter_args
+):
+    # Given
+    base_url = reverse(
+        "api-v1:organisations:organisation-get-influx-data", args=[organisation.id]
+    )
+    url = f"{base_url}?{query_string}"
+    mock_get_multiple_event_list_for_organisation = mocker.patch(
+        "organisations.views.get_multiple_event_list_for_organisation"
+    )
+    mock_get_multiple_event_list_for_organisation.return_value = []
+
+    # When
+    response = admin_client.get(url)
+
+    # Then
+    assert response.status_code == status.HTTP_200_OK
+    mock_get_multiple_event_list_for_organisation.assert_called_once_with(
+        str(organisation.id), **expected_filter_args
+    )
+    assert response.json() == {"events_list": []}
+
+
+def test_delete_organisation_does_not_delete_all_subscriptions_from_the_database(
+    admin_client, admin_user, organisation, subscription
+):
+    """
+    Test to verify workaround for bug in django-softdelete as per issue here:
+    https://github.com/scoursen/django-softdelete/issues/99
+    """
+
+    # Given
+    # another organisation
+    another_organisation = Organisation.objects.create(name="another org")
+    admin_user.add_organisation(another_organisation)
+
+    url = reverse("api-v1:organisations:organisation-detail", args=[organisation.id])
+
+    # When
+    response = admin_client.delete(url)
+
+    # Then
+    assert response.status_code == status.HTTP_204_NO_CONTENT
+
+    assert Subscription.objects.filter(organisation=another_organisation).exists()

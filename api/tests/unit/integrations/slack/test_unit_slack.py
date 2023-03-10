@@ -1,3 +1,7 @@
+import pytest
+from slack_sdk.errors import SlackApiError
+
+from integrations.slack.exceptions import SlackChannelJoinError
 from integrations.slack.slack import SlackChannel, SlackWrapper
 
 
@@ -67,6 +71,20 @@ def test_join_channel_makes_correct_call(mocker, mocked_slack_internal_client):
     mocked_slack_internal_client.conversations_join.assert_called_with(channel=channel)
 
 
+def test_join_channel_raises_slack_channel_join_error_on_slack_api_error(
+    mocker, mocked_slack_internal_client
+):
+    # Given
+    channel = "channel_1"
+    api_token = "random_token"
+    mocked_slack_internal_client.conversations_join.side_effect = SlackApiError(
+        message="server_error", response={"error": "some_error_code"}
+    )
+    # Then
+    with pytest.raises(SlackChannelJoinError):
+        SlackWrapper(api_token=api_token, channel_id=channel).join_channel()
+
+
 def test_get_bot_token_makes_correct_calls(
     mocker, settings, mocked_slack_internal_client
 ):
@@ -107,11 +125,11 @@ def test_slack_initialized_correctly(mocker, mocked_slack_internal_client):
     assert slack_wrapper._client == mocked_slack_internal_client
 
 
-def test_track_event_makes_correct_call(mocker, mocked_slack_internal_client):
+def test_track_event_makes_correct_call(mocked_slack_internal_client):
     # Given
     api_token = "test_token"
     channel_id = "channel_id_1"
-    event = {"text": "random_text"}
+    event = {"blocks": []}
 
     slack_wrapper = SlackWrapper(api_token, channel_id)
 
@@ -120,7 +138,7 @@ def test_track_event_makes_correct_call(mocker, mocked_slack_internal_client):
 
     # Then
     mocked_slack_internal_client.chat_postMessage.assert_called_with(
-        channel=channel_id, text=event["text"]
+        channel=channel_id, blocks=event["blocks"]
     )
 
 
@@ -134,6 +152,13 @@ def test_slack_generate_event_data_with_correct_values():
     event_data = SlackWrapper.generate_event_data(log, email, environment_name)
 
     # Then
-    assert event_data["title"] == "Flagsmith Feature Flag Event"
-    assert event_data["text"] == f"{log} by user {email}"
-    assert event_data["tags"] == [f"env:{environment_name}"]
+    assert event_data["blocks"] == [
+        {"type": "section", "text": {"type": "plain_text", "text": log}},
+        {
+            "type": "section",
+            "fields": [
+                {"type": "mrkdwn", "text": f"*Environment:*\n{environment_name}"},
+                {"type": "mrkdwn", "text": f"*User:*\n{email}"},
+            ],
+        },
+    ]

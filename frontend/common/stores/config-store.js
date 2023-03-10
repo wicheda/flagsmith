@@ -1,10 +1,8 @@
+import Project from 'common/project';
+const Dispatcher = require('../dispatcher/dispatcher');
 const BaseStore = require('./base/_store');
 window.Project = require('../project');
 
-window.Project = {
-    ...window.Project,
-    ...projectOverrides, // environment.js (also app.yaml if using app engine)
-};
 const controller = {
     get() {
         store.loading();
@@ -33,12 +31,9 @@ const store = Object.assign({}, BaseStore, {
 
 
 store.dispatcherIndex = Dispatcher.register(store, (payload) => {
-    const action = payload.action; // this is our action from	handleViewAction
+    const action = payload.action; // this is our action from handleViewAction
 
     switch (action.actionType) {
-        case Actions.GET_CONFIG:
-            controller.get();
-            break;
         default:
             break;
     }
@@ -49,8 +44,9 @@ flagsmith.init({
     onChange: controller.loaded,
     api: Project.flagsmithClientAPI,
     cacheFlags: true,
+    realtime: true,
     AsyncStorage,
-    enableAnalytics: projectOverrides.flagsmithAnalytics,
+    enableAnalytics: Project.flagsmithAnalytics,
 }).catch(() => {
     controller.onError();
 });

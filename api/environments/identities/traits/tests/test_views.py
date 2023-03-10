@@ -7,7 +7,6 @@ from core.constants import INTEGER, STRING
 from django.test import override_settings
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.request import Request
 from rest_framework.test import APIClient, APITestCase
 
 from environments.identities.models import Identity
@@ -15,7 +14,7 @@ from environments.identities.traits.constants import (
     TRAIT_STRING_VALUE_MAX_LENGTH,
 )
 from environments.identities.traits.models import Trait
-from environments.models import Environment
+from environments.models import Environment, EnvironmentAPIKey
 from organisations.models import Organisation, OrganisationRole
 from projects.models import Project
 from util.tests import Helper
@@ -27,7 +26,7 @@ class SDKTraitsTest(APITestCase):
     def setUp(self) -> None:
         self.organisation = Organisation.objects.create(name="Test organisation")
         project = Project.objects.create(
-            name="Test project", organisation=self.organisation
+            name="Test project", organisation=self.organisation, enable_dynamo_db=True
         )
         self.environment = Environment.objects.create(
             name="Test environment", project=project
@@ -39,7 +38,8 @@ class SDKTraitsTest(APITestCase):
         self.trait_key = "trait_key"
         self.trait_value = "trait_value"
 
-    def test_can_set_trait_for_an_identity(self):
+    @mock.patch("sse.decorators.send_identity_update_message")
+    def test_can_set_trait_for_an_identity(self, mock_send_identity_update_message):
         # Given
         url = reverse("api-v1:sdk-traits-list")
 
@@ -55,9 +55,13 @@ class SDKTraitsTest(APITestCase):
         assert Trait.objects.filter(
             identity=self.identity, trait_key=self.trait_key
         ).exists()
+        mock_send_identity_update_message.assert_called_once_with(
+            self.environment, self.identity.identifier
+        )
 
+    @mock.patch("sse.decorators.send_identity_update_message")
     def test_cannot_set_trait_for_an_identity_for_organisations_without_persistence(
-        self,
+        self, mock_send_identity_update_message
     ):
         # Given
         url = reverse("api-v1:sdk-traits-list")
@@ -81,6 +85,9 @@ class SDKTraitsTest(APITestCase):
 
         # and no traits are stored
         assert Trait.objects.count() == 0
+
+        # and send_identity_update_message was not called
+        mock_send_identity_update_message.assert_not_called()
 
     def test_can_set_trait_with_boolean_value_for_an_identity(self):
         # Given
@@ -198,7 +205,10 @@ class SDKTraitsTest(APITestCase):
         trait.refresh_from_db()
         assert trait.get_trait_value() == new_value
 
-    def test_increment_value_increments_trait_value_if_value_positive_integer(self):
+    @mock.patch("sse.decorators.send_identity_update_message")
+    def test_increment_value_increments_trait_value_if_value_positive_integer(
+        self, mock_send_identity_update_message
+    ):
         # Given
         initial_value = 2
         increment_by = 2
@@ -222,6 +232,9 @@ class SDKTraitsTest(APITestCase):
         # Then
         trait.refresh_from_db()
         assert trait.get_trait_value() == initial_value + increment_by
+        mock_send_identity_update_message.assert_called_once_with(
+            self.environment, self.identity.identifier
+        )
 
     def test_increment_value_decrements_trait_value_if_value_negative_integer(self):
         # Given
@@ -328,13 +341,16 @@ class SDKTraitsTest(APITestCase):
             identity=self.identity, trait_key=self.trait_key
         ).get_trait_value() == str(bad_trait_value)
 
-    def test_bulk_create_traits(self):
+    @mock.patch("environments.identities.traits.views.send_identity_update_messages")
+    def test_bulk_create_traits(self, mock_send_identity_update_messages):
         # Given
         num_traits = 20
         url = reverse("api-v1:sdk-traits-bulk-create")
         traits = [
-            self._generate_trait_data(trait_key=f"trait_{i}") for i in range(num_traits)
+            self._generate_trait_data(trait_key=f"trait_{i}", identifier="user_{i}")
+            for i in range(num_traits)
         ]
+        identifiers = [trait["identity"]["identifier"] for trait in traits]
 
         # When
         response = self.client.put(
@@ -343,7 +359,13 @@ class SDKTraitsTest(APITestCase):
 
         # Then
         assert response.status_code == status.HTTP_200_OK
-        assert Trait.objects.filter(identity=self.identity).count() == num_traits
+        assert (
+            Trait.objects.filter(identity__identifier__in=identifiers).count()
+            == num_traits
+        )
+        mock_send_identity_update_messages.assert_called_once_with(
+            self.environment, identifiers
+        )
 
     def test_bulk_create_traits_when_bad_trait_value_sent_then_trait_value_stringified(
         self,
@@ -465,11 +487,12 @@ class SDKTraitsTest(APITestCase):
         self.client.post(url, data=data, content_type=self.JSON)
 
         # Then
-        args, kwargs = mocked_forward_trait_request.call_args_list[0]
-        assert kwargs == {}
-        assert isinstance(args[0], Request)
-        assert args[0].data == json.loads(data)
-        assert args[1] == self.environment.project.id
+        args, kwargs = mocked_forward_trait_request.delay.call_args_list[0]
+        assert args == ()
+        assert kwargs["args"][0] == "POST"
+        assert kwargs["args"][1].get("X-Environment-Key") == self.environment.api_key
+        assert kwargs["args"][2] == self.environment.project.id
+        assert kwargs["args"][3] == json.loads(data)
 
     @override_settings(EDGE_API_URL="http://localhost")
     @mock.patch("environments.identities.traits.views.forward_trait_request")
@@ -477,7 +500,6 @@ class SDKTraitsTest(APITestCase):
         self, mocked_forward_trait_request
     ):
         # Given
-        url = reverse("api-v1:sdk-traits-list")
         url = reverse("api-v1:sdk-traits-increment-value")
         data = {
             "trait_key": self.trait_key,
@@ -489,15 +511,16 @@ class SDKTraitsTest(APITestCase):
         self.client.post(url, data=data)
 
         # Then
-        args, kwargs = mocked_forward_trait_request.call_args_list[0]
-        assert kwargs == {}
-        assert isinstance(args[0], Request)
-        assert args[1] == self.environment.project.id
+        args, kwargs = mocked_forward_trait_request.delay.call_args_list[0]
+        assert args == ()
+        assert kwargs["args"][0] == "POST"
+        assert kwargs["args"][1].get("X-Environment-Key") == self.environment.api_key
+        assert kwargs["args"][2] == self.environment.project.id
 
         # and the structure of payload was correct
-        assert args[2]["identity"]["identifier"] == data["identifier"]
-        assert args[2]["trait_key"] == data["trait_key"]
-        assert args[2]["trait_value"]
+        assert kwargs["args"][3]["identity"]["identifier"] == data["identifier"]
+        assert kwargs["args"][3]["trait_key"] == data["trait_key"]
+        assert kwargs["args"][3]["trait_value"]
 
     @override_settings(EDGE_API_URL="http://localhost")
     @mock.patch("environments.identities.traits.views.forward_trait_requests")
@@ -525,11 +548,104 @@ class SDKTraitsTest(APITestCase):
         )
 
         # Then
-        args, kwargs = mocked_forward_trait_requests.call_args_list[0]
-        assert kwargs == {}
-        assert isinstance(args[0], Request)
-        assert args[0].data == request_data
-        assert args[1] == self.environment.project.id
+
+        # Then
+        args, kwargs = mocked_forward_trait_requests.delay.call_args_list[0]
+        assert args == ()
+        assert kwargs["args"][0] == "PUT"
+        assert kwargs["args"][1].get("X-Environment-Key") == self.environment.api_key
+        assert kwargs["args"][2] == self.environment.project.id
+        assert kwargs["args"][3] == request_data
+
+    def test_create_trait_returns_403_if_client_cannot_set_traits(self):
+        # Given
+        url = reverse("api-v1:sdk-traits-list")
+        data = {
+            "identity": {"identifier": self.identity.identifier},
+            "trait_key": "foo",
+            "trait_value": "bar",
+        }
+
+        self.environment.allow_client_traits = False
+        self.environment.save()
+
+        # When
+        response = self.client.post(
+            url, data=json.dumps(data), content_type="application/json"
+        )
+
+        # Then
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_server_key_can_create_trait_if_not_allow_client_traits(self):
+        # Given
+        url = reverse("api-v1:sdk-traits-list")
+        data = {
+            "identity": {"identifier": self.identity.identifier},
+            "trait_key": "foo",
+            "trait_value": "bar",
+        }
+
+        server_api_key = EnvironmentAPIKey.objects.create(environment=self.environment)
+        self.client.credentials(HTTP_X_ENVIRONMENT_KEY=server_api_key.key)
+
+        self.environment.allow_client_traits = False
+        self.environment.save()
+
+        # When
+        response = self.client.post(
+            url, data=json.dumps(data), content_type="application/json"
+        )
+
+        # Then
+        assert response.status_code == status.HTTP_200_OK
+
+    def test_bulk_create_traits_returns_403_if_client_cannot_set_traits(self):
+        # Given
+        url = reverse("api-v1:sdk-traits-bulk-create")
+        data = [
+            {
+                "identity": {"identifier": self.identity.identifier},
+                "trait_key": "foo",
+                "trait_value": "bar",
+            }
+        ]
+
+        self.environment.allow_client_traits = False
+        self.environment.save()
+
+        # When
+        response = self.client.put(
+            url, data=json.dumps(data), content_type="application/json"
+        )
+
+        # Then
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_server_key_can_bulk_create_traits_if_not_allow_client_traits(self):
+        # Given
+        url = reverse("api-v1:sdk-traits-bulk-create")
+        data = [
+            {
+                "identity": {"identifier": self.identity.identifier},
+                "trait_key": "foo",
+                "trait_value": "bar",
+            }
+        ]
+
+        server_api_key = EnvironmentAPIKey.objects.create(environment=self.environment)
+        self.client.credentials(HTTP_X_ENVIRONMENT_KEY=server_api_key.key)
+
+        self.environment.allow_client_traits = False
+        self.environment.save()
+
+        # When
+        response = self.client.put(
+            url, data=json.dumps(data), content_type="application/json"
+        )
+
+        # Then
+        assert response.status_code == status.HTTP_200_OK
 
     def _generate_trait_data(self, identifier=None, trait_key=None, trait_value=None):
         identifier = identifier or self.identity.identifier
@@ -567,30 +683,6 @@ class TraitViewSetTestCase(TestCase):
         self.identity = Identity.objects.create(
             identifier="test-user", environment=self.environment
         )
-
-    def test_can_delete_trait(self):
-        # Given
-        trait_key = "trait_key"
-        trait_value = "trait_value"
-        trait = Trait.objects.create(
-            identity=self.identity,
-            trait_key=trait_key,
-            value_type=STRING,
-            string_value=trait_value,
-        )
-        url = reverse(
-            "api-v1:environments:identities-traits-detail",
-            args=[self.environment.api_key, self.identity.id, trait.id],
-        )
-
-        # When
-        res = self.client.delete(url)
-
-        # Then
-        assert res.status_code == status.HTTP_204_NO_CONTENT
-
-        # and
-        assert not Trait.objects.filter(pk=trait.id).exists()
 
     def test_delete_trait_only_deletes_single_trait_if_query_param_not_provided(self):
         # Given

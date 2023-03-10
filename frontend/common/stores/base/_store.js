@@ -26,7 +26,6 @@ module.exports = Object.assign({}, EventEmitter.prototype, {
     subscriptions: {},
 
     trigger(eventName, data) {
-        API.log(this.id, eventName || DEFAULT_CHANGE_EVENT, this);
         this.emit(eventName || DEFAULT_CHANGE_EVENT, data);
     },
 
@@ -45,6 +44,7 @@ module.exports = Object.assign({}, EventEmitter.prototype, {
 
     loaded() {
         this.hasLoaded = true;
+        this.error = null;
         this.isLoading = false;
         this.trigger(DEFAULT_LOADED_EVENT);
         this.trigger(DEFAULT_CHANGE_EVENT);
@@ -55,9 +55,9 @@ module.exports = Object.assign({}, EventEmitter.prototype, {
         this.trigger(DEFAULT_CHANGE_EVENT);
     },
 
-    saved() {
+    saved(data) {
         this.isSaving = false;
-        this.trigger(DEFAULT_SAVED_EVENT);
+        this.trigger(DEFAULT_SAVED_EVENT, data);
         this.trigger(DEFAULT_CHANGE_EVENT);
     },
 

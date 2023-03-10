@@ -2,7 +2,6 @@ from djoser.serializers import UserSerializer as DjoserUserSerializer
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 
-from organisations.invites.models import Invite
 from organisations.models import Organisation
 from organisations.serializers import UserOrganisationSerializer
 
@@ -58,7 +57,7 @@ class UserListSerializer(serializers.ModelSerializer):
     role = serializers.SerializerMethodField(read_only=True)
     join_date = serializers.SerializerMethodField(read_only=True)
 
-    default_fields = ("id", "email", "first_name", "last_name")
+    default_fields = ("id", "email", "first_name", "last_name", "last_login")
     organisation_users_fields = ("role", "date_joined")
 
     class Meta:
@@ -77,26 +76,6 @@ class UserListSerializer(serializers.ModelSerializer):
         return instance.get_organisation_join_date(self.context.get("organisation"))
 
 
-class InviteSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Invite
-        fields = (
-            "email",
-            "organisation",
-            "frontend_base_url",
-            "invited_by",
-            "date_created",
-        )
-
-
-class InviteListSerializer(serializers.ModelSerializer):
-    invited_by = UserListSerializer()
-
-    class Meta:
-        model = Invite
-        fields = ("id", "email", "date_created", "invited_by")
-
-
 class UserIdsSerializer(serializers.Serializer):
     user_ids = serializers.ListField(child=serializers.IntegerField())
 
@@ -112,7 +91,7 @@ class UserIdsSerializer(serializers.Serializer):
 class UserPermissionGroupSerializerList(serializers.ModelSerializer):
     class Meta:
         model = UserPermissionGroup
-        fields = ("id", "name", "users")
+        fields = ("id", "name", "users", "is_default", "external_id")
         read_only_fields = ("id",)
 
 
@@ -127,3 +106,7 @@ class CustomCurrentUserSerializer(DjoserUserSerializer):
 
     class Meta(DjoserUserSerializer.Meta):
         fields = DjoserUserSerializer.Meta.fields + ("auth_type", "is_superuser")
+
+
+class ListUsersQuerySerializer(serializers.Serializer):
+    exclude_current = serializers.BooleanField(default=False)

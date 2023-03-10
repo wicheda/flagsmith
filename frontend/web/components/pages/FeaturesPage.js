@@ -1,17 +1,17 @@
 import React, { Component } from 'react';
-import EditIdentityModal from './UserPage';
 import CreateFlagModal from '../modals/CreateFlag';
-import ConfirmToggleFeature from '../modals/ConfirmToggleFeature';
 import TryIt from '../TryIt';
-import ConfirmRemoveFeature from '../modals/ConfirmRemoveFeature';
-import TagSelect from '../TagSelect';
-import HistoryIcon from '../HistoryIcon';
-import TagValues from '../TagValues';
-import withAuditWebhooks from '../../../common/providers/withAuditWebhooks';
-import TagStore from '../../../common/stores/tags-store';
-import { Tag } from '../AddEditTags';
+import TagFilter from '../tags/TagFilter';
+import Tag from '../tags/Tag';
 import FeatureRow from '../FeatureRow';
-
+import FeatureListStore from 'common/stores/feature-list-store';
+import ProjectStore from 'common/stores/project-store';
+import Permission from "common/providers/Permission";
+import { getTags } from "common/services/useTag";
+import { getStore } from "common/store";
+import JSONReference from "../JSONReference";
+import ConfigProvider from 'common/providers/ConfigProvider';
+import Constants from 'common/constants';
 const FeaturesPage = class extends Component {
     static displayName = 'FeaturesPage';
 
@@ -24,27 +24,27 @@ const FeaturesPage = class extends Component {
         this.state = {
             tags: [],
             showArchived: false,
+            search: null,
+            sort: { label: 'Name', sortBy: 'name', sortOrder: 'asc' },
         };
         ES6Component(this);
-        this.listenTo(TagStore, 'loaded', () => {
-            const tags = TagStore.model && TagStore.model[parseInt(this.props.match.params.projectId)];
-        });
-        AppActions.getFeatures(this.props.match.params.projectId, this.props.match.params.environmentId);
+        getTags(getStore(),{
+            projectId: `${this.props.match.params.projectId}`
+        })
+        AppActions.getFeatures(this.props.match.params.projectId, this.props.match.params.environmentId, true, this.state.search, this.state.sort, 0, this.getFilter());
     }
 
     componentWillUpdate(newProps) {
         const { match: { params } } = newProps;
         const { match: { params: oldParams } } = this.props;
         if (params.environmentId != oldParams.environmentId || params.projectId != oldParams.projectId) {
-            this.getTags(params.projectId);
-            AppActions.getFeatures(params.projectId, params.environmentId);
+            AppActions.getFeatures(params.projectId, params.environmentId, true, this.state.search, this.state.sort, 0, this.getFilter());
         }
     }
 
     componentDidMount = () => {
         API.trackPage(Constants.pages.FEATURES);
         const { match: { params } } = this.props;
-        this.getTags(params.projectId);
         AsyncStorage.setItem('lastEnv', JSON.stringify({
             orgId: AccountStore.getOrganisation().id,
             projectId: params.projectId,
@@ -57,64 +57,41 @@ const FeaturesPage = class extends Component {
           router={this.context.router}
           environmentId={this.props.match.params.environmentId}
           projectId={this.props.match.params.projectId}
-        />, null, { className: 'side-modal fade' });
+        />, null, { className: 'side-modal fade create-feature-modal' });
     };
-
-
-    getTags = (projectId) => {
-        AppActions.getTags(projectId);
-        // AsyncStorage.getItem(`${projectId}tags`).then((res) => {
-        //     if (res) {
-        //         this.setState({
-        //             tags: JSON.parse(res),
-        //         });
-        //     }
-        // });
-    }
 
     componentWillReceiveProps(newProps) {
         if (newProps.match.params.environmentId != this.props.match.params.environmentId) {
-            AppActions.getFeatures(newProps.match.params.projectId, newProps.match.params.environmentId);
+            AppActions.getFeatures(newProps.match.params.projectId, newProps.match.params.environmentId, false, this.state.search, null, 0, this.getFilter());
         }
     }
 
-    onSave = () => {
-        toast('Environment Saved');
-    };
+    getFilter = () => ({
+        tags: !this.state.tags || !this.state.tags.length ? undefined : this.state.tags.join(','),
+        is_archived: this.state.showArchived,
+    })
 
-    editIdentity = (id, envFlags) => {
-        openModal(<EditIdentityModal id={id} envFlags={envFlags}/>);
-    }
+    onSave = () => {
+        toast('Saved');
+    };
 
     onError = (error) => {
         // Kick user back out to projects
         this.setState({ error });
-        if (typeof closeModal !== 'undefined') {
-            closeModal();
+        if(!error?.name && !error?.initial_value) {
+            // Could not determine field level error, show generic toast.
             toast('We could not create this feature, please check the name is not in use.');
         }
     }
 
-    filter = flags => _.filter(flags, (flag) => {
-
-        if (!this.state.showArchived && flag.is_archived) {
-            return false
-        }
-        if(!this.state.tags || !this.state.tags.length) {
-            return true
-        }
-        if(this.state.tags.includes('') && (!flag.tags || !flag.tags.length)) {
-            return true
-        }
-
-        return _.intersection(flag.tags || [], this.state.tags).length;
-
-    }) || []
+    filter = () => {
+        AppActions.searchFeatures(this.props.match.params.projectId, this.props.match.params.environmentId, true, this.state.search, this.state.sort, 0, this.getFilter());
+    }
 
     createFeaturePermission(el) {
         return (
             <Permission level="project" permission="CREATE_FEATURE" id={this.props.match.params.projectId}>
-                {({ permission, isLoading }) => (permission ? (
+                {({ permission }) => (permission ? (
                     el(permission)
                 ) : Utils.renderWithPermission(permission, Constants.projectPermissions('Create Feature'), el(permission)))}
             </Permission>
@@ -123,18 +100,20 @@ const FeaturesPage = class extends Component {
 
     render() {
         const { projectId, environmentId } = this.props.match.params;
-        const readOnly = this.props.hasFeature('read_only_mode');
+        const readOnly = Utils.getFlagsmithHasFeature('read_only_mode');
+        const environment = ProjectStore.getEnvironment(environmentId);
+
         return (
             <div data-test="features-page" id="features-page" className="app-container container">
                 <FeatureListProvider onSave={this.onSave} onError={this.onError}>
-                    {({ isLoading, projectFlags, environmentFlags }, { environmentHasFlag, toggleFlag, editFlag, removeFlag }) => {
-                        const archivedLength = projectFlags ? projectFlags.filter(v => v.is_archived === true).length : 0;
+                    {({ projectFlags, environmentFlags }, { toggleFlag, removeFlag }) => {
+                        const isLoading = FeatureListStore.isLoading;
                         return (
                             <div className="features-page">
                                 {isLoading && (!projectFlags || !projectFlags.length) && <div className="centered-container"><Loader/></div>}
-                                {(!isLoading || (projectFlags && projectFlags.length)) && (
+                                {(!isLoading || (projectFlags && !!projectFlags.length)) && (
                                     <div>
-                                        {projectFlags && projectFlags.length ? (
+                                        {(projectFlags && projectFlags.length) || ((this.state.showArchived || typeof this.state.search === 'string' || !!this.state.tags.length) && !isLoading) ? (
                                             <div>
                                                 <Row>
                                                     <Flex>
@@ -143,7 +122,7 @@ const FeaturesPage = class extends Component {
                                                             View and manage
                                                             {' '}
                                                             <Tooltip
-                                                              title={<ButtonLink buttonText="feature flags" />}
+                                                                title={<ButtonLink>feature flags</ButtonLink>}
                                                               place="right"
                                                             >
                                                                 {Constants.strings.FEATURE_FLAG_DESCRIPTION}
@@ -153,7 +132,7 @@ const FeaturesPage = class extends Component {
                                                             {' '}
                                                             {' '}
                                                             <Tooltip
-                                                              title={<ButtonLink buttonText="remote config" />}
+                                                                title={<ButtonLink>remote config</ButtonLink>}
                                                               place="right"
                                                             >
                                                                 {Constants.strings.REMOTE_CONFIG_DESCRIPTION}
@@ -177,7 +156,7 @@ const FeaturesPage = class extends Component {
                                                             : null}
                                                     </FormGroup>
                                                 </Row>
-                                                <Permission level="environment" permission={Utils.getManageFeaturePermission()} id={this.props.match.params.environmentId}>
+                                                <Permission level="environment" permission={Utils.getManageFeaturePermission(Utils.changeRequestsEnabled(environment && environment.minimum_change_request_approvals))} id={this.props.match.params.environmentId}>
                                                     {({ permission, isLoading }) => (
                                                         <FormGroup className="mb-4">
                                                             <PanelSearch
@@ -187,35 +166,65 @@ const FeaturesPage = class extends Component {
                                                               title="Features"
                                                               renderSearchWithNoResults
                                                               itemHeight={65}
+                                                              isLoading={FeatureListStore.isLoading}
+                                                              paging={FeatureListStore.paging}
+                                                              search={this.state.search}
+                                                              onChange={(e) => {
+                                                                  this.setState({ search: Utils.safeParseEventValue(e) }, () => {
+                                                                      AppActions.searchFeatures(this.props.match.params.projectId, this.props.match.params.environmentId, true, this.state.search, this.state.sort, 0, this.getFilter());
+                                                                  });
+                                                              }}
+                                                              nextPage={() => AppActions.getFeatures(this.props.match.params.projectId, this.props.match.params.environmentId, true, this.state.search, this.state.sort, FeatureListStore.paging.next, this.getFilter())}
+                                                              prevPage={() => AppActions.getFeatures(this.props.match.params.projectId, this.props.match.params.environmentId, true, this.state.search, this.state.sort, FeatureListStore.paging.previous, this.getFilter())}
+                                                              goToPage={page => AppActions.getFeatures(this.props.match.params.projectId, this.props.match.params.environmentId, true, this.state.search, this.state.sort, page, this.getFilter())}
+                                                              onSortChange={(sort) => {
+                                                                  this.setState({ sort }, () => {
+                                                                      AppActions.getFeatures(this.props.match.params.projectId, this.props.match.params.environmentId, true, this.state.search, this.state.sort, 0, this.getFilter());
+                                                                  });
+                                                              }}
                                                               sorting={[
                                                                   { label: 'Name', value: 'name', order: 'asc', default: true },
                                                                   { label: 'Created Date', value: 'created_date', order: 'asc' },
                                                               ]}
-                                                              items={this.filter(projectFlags, this.state.tags)}
+                                                              items={projectFlags}
                                                               header={(
                                                                   <Row className="px-0 pt-0 pb-2">
-                                                                      <TagSelect
+                                                                      <TagFilter
                                                                         showUntagged
-                                                                        showClearAll
-                                                                        projectId={projectId} value={this.state.tags} onChange={(tags) => {
-                                                                            this.setState({ tags });
+                                                                        showClearAll={(this.state.tags && !!this.state.tags.length) || this.state.showArchived}
+                                                                        onClearAll={() => this.setState({ showArchived: false, tags: [] }, this.filter)}
+                                                                        projectId={`${projectId}`} value={this.state.tags} onChange={(tags) => {
+                                                                            FeatureListStore.isLoading = true;
+                                                                            if (tags.includes('') && tags.length>1) {
+                                                                                if (!this.state.tags.includes('')) {
+                                                                                    this.setState({ tags: [''] }, this.filter);
+                                                                                } else {
+                                                                                    this.setState({ tags: tags.filter(v => !!v) }, this.filter);
+                                                                                }
+                                                                            } else {
+                                                                                this.setState({ tags }, this.filter);
+                                                                            }
                                                                             AsyncStorage.setItem(`${projectId}tags`, JSON.stringify(tags));
                                                                         }}
                                                                       >
-                                                                          {!!archivedLength && (
-                                                                              <div className="mr-2 mb-2">
-                                                                                  <Tag
-                                                                                    selected={this.state.showArchived}
-                                                                                    onClick={() => this.setState({ showArchived: !this.state.showArchived })}
-                                                                                    className="px-2 py-2 ml-2 mr-2"
-                                                                                    tag={{ label: `Include Archived` }}
-                                                                                  />
-                                                                              </div>
-
-                                                                          )}
-                                                                      </TagSelect>
+                                                                          <Tag
+                                                                            selected={this.state.showArchived}
+                                                                            onClick={() => {
+                                                                                FeatureListStore.isLoading = true;
+                                                                                this.setState({ showArchived: !this.state.showArchived }, this.filter);
+                                                                            }}
+                                                                            className="px-2 py-2 ml-2 mr-2"
+                                                                            tag={{ label: 'Archived' }}
+                                                                          />
+                                                                      </TagFilter>
                                                                   </Row>
                                                                 )}
+                                                              renderFooter={()=>(
+                                                                  <>
+                                                                      <JSONReference className="mx-2 mt-4" showNamesButton title={"Features"} json={projectFlags}/>
+                                                                      <JSONReference className="mx-2" title={"Feature States"} json={environmentFlags && Object.values(environmentFlags)}/>
+                                                                  </>
+                                                              )}
                                                               renderRow={(projectFlag, i) => (
                                                                   <FeatureRow
                                                                     environmentFlags={environmentFlags}
@@ -225,18 +234,17 @@ const FeaturesPage = class extends Component {
                                                                     projectId={projectId}
                                                                     index={i} canDelete={permission}
                                                                     toggleFlag={toggleFlag}
-                                                                    editFlag={editFlag}
                                                                     removeFlag={removeFlag}
                                                                     projectFlag={projectFlag}
                                                                   />
                                                               )}
-                                                              filterRow={({ name }, search) => name.toLowerCase().indexOf(search) > -1}
+                                                              filterRow={({ name }, search) => true}
                                                             />
                                                         </FormGroup>
                                                     )}
 
                                                 </Permission>
-                                                <FormGroup>
+                                                <FormGroup className="mt-5">
                                                     <CodeHelp
                                                       title="1: Installing the SDK"
                                                       snippets={Constants.codeHelp.INSTALL}
@@ -246,7 +254,7 @@ const FeaturesPage = class extends Component {
                                                       snippets={Constants.codeHelp.INIT(this.props.match.params.environmentId, projectFlags && projectFlags[0] && projectFlags[0].name)}
                                                     />
                                                 </FormGroup>
-                                                <FormGroup>
+                                                <FormGroup className="pb-4">
                                                     <TryIt
                                                       title="Test what values are being returned from the API on this environment"
                                                       environmentId={this.props.match.params.environmentId}
@@ -360,7 +368,6 @@ const FeaturesPage = class extends Component {
                                                 ))}
                                             </div>
                                         )}
-
                                     </div>
                                 )}
                             </div>
@@ -374,4 +381,4 @@ const FeaturesPage = class extends Component {
 
 FeaturesPage.propTypes = {};
 
-module.exports = hot(module)(ConfigProvider(FeaturesPage));
+module.exports = ConfigProvider(FeaturesPage);

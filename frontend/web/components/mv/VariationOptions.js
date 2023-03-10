@@ -1,10 +1,24 @@
 import React from 'react';
-import Constants from '../../../common/constants';
+import Constants from 'common/constants';
 import VariationValue from './VariationValue';
+import ValueEditor from '../ValueEditor';
+import InfoMessage from '../InfoMessage';
 
-export default function VariationOptions({ multivariateOptions, select, controlValue, weightTitle, variationOverrides, removeVariation, updateVariation, setVariations, setValue }) {
+export default function VariationOptions({
+    controlValue,
+    disabled,
+    multivariateOptions,
+    preventRemove,
+    readOnlyValue,
+    removeVariation,
+    select,
+    setValue,
+    setVariations,
+    updateVariation,
+    variationOverrides,
+    weightTitle,
+}) {
     const invalid = multivariateOptions.length && controlValue < 0;
-
     if (!multivariateOptions || !multivariateOptions.length) {
         return null;
     }
@@ -16,14 +30,21 @@ export default function VariationOptions({ multivariateOptions, select, controlV
                     Your variation percentage splits total to over 100%
                 </div>
             )}
-            <p>{Constants.strings.MULTIVARIATE_DESCRIPTION}</p>
+            {!preventRemove && (
+                <p>
+                    <InfoMessage>
+                        Variation values are shared amongst environments, their weights are specific to this Environment.<br/>These values will only apply when you identify via the SDK. <a target="_blank" href="https://docs.flagsmith.com/basic-features/managing-features#multi-variate-flags">Check the Docs for more details</a>.
+                    </InfoMessage>
+                </p>
+            )}
+
             {select && (
                 <div className="panel panel--flat panel-without-heading mb-2">
                     <div className="panel-content">
                         <Row>
-                            <div className="flex flex-1 align-start">
-                                <FeatureValue value={Utils.getTypedValue(controlValue)}/>
-                            </div>
+                            <Flex>
+                                <ValueEditor disabled value={Utils.getTypedValue(controlValue)}/>
+                            </Flex>
                             <div
                               onMouseDown={(e) => {
                                   e.stopPropagation();
@@ -38,17 +59,18 @@ export default function VariationOptions({ multivariateOptions, select, controlV
             )}
             {
                 multivariateOptions.map((theValue, i) => {
-                    let override = select
+                    const override = select
                         ? variationOverrides && variationOverrides[0] && typeof variationOverrides[0].multivariate_feature_option_index === 'number' ? i === variationOverrides[0].multivariate_feature_option_index
 && variationOverrides[0] : variationOverrides && variationOverrides.find(v => v.multivariate_feature_option === theValue.id) : variationOverrides && variationOverrides.find(v => v.percentage_allocation === 100);
                     return select ? (
                         <div className="panel panel--flat panel-without-heading mb-2">
                             <div className="panel-content">
                                 <Row>
-                                    <div className="flex flex-1 align-start">
-                                        <FeatureValue value={Utils.getTypedValue(Utils.featureStateToValue(theValue))}/>
-                                    </div>
+                                    <Flex>
+                                        <ValueEditor disabled={true} value={Utils.getTypedValue(Utils.featureStateToValue(theValue))}/>
+                                    </Flex>
                                     <div
+                                      data-test={`select-variation-${Utils.featureStateToValue(theValue)}`}
                                       onMouseDown={(e) => {
                                           e.stopPropagation();
                                           e.preventDefault();
@@ -67,12 +89,16 @@ export default function VariationOptions({ multivariateOptions, select, controlV
                     ) : (
                         <VariationValue
                           key={i}
+                          index={i}
+                          readOnlyValue={readOnlyValue}
+                          preventRemove={preventRemove || disabled}
                           value={theValue}
                           onChange={(e) => {
                               updateVariation(i, e, variationOverrides);
                           }}
                           weightTitle={weightTitle}
-                          onRemove={() => removeVariation(i)}
+                          disabled={disabled}
+                          onRemove={preventRemove || disabled ? null : () => removeVariation(i)}
                         />
                     );
                 })

@@ -1,13 +1,16 @@
 {
     "family": "flagsmith-api-migration",
     "networkMode": "awsvpc",
-    "executionRoleArn": "arn:aws:iam::302456015006:role/task-exec-role-5512471",
-    "taskRoleArn": "arn:aws:iam::302456015006:role/task-exec-role-5512471",
+    "executionRoleArn": "arn:aws:iam::302456015006:role/task-exec-role-6fb76f6",
+    "taskRoleArn": "arn:aws:iam::302456015006:role/task-exec-role-6fb76f6",
     "containerDefinitions": [
         {
             "name": "flagsmith-api-migration",
             "command": [
-                "migrate"
+                "migrate",
+                "&&",
+                "migrate-analytics-db"
+
             ],
             "environment": [
                 {
@@ -25,12 +28,20 @@
                 {
                     "name": "PROJECT_METADATA_TABLE_NAME_DYNAMO",
                     "value": "flagsmith_project_metadata"
+                },
+                {
+                    "name": "ENVIRONMENTS_TABLE_NAME_DYNAMO",
+                    "value": "flagsmith_environments"
                 }
             ],
             "secrets": [
                 {
                     "name": "DATABASE_URL",
-                    "valueFrom": "arn:aws:secretsmanager:eu-west-2:302456015006:secret:DATABASE_URL-EMaUaY:DATABASE_URL::"
+                    "valueFrom": "arn:aws:secretsmanager:eu-west-2:302456015006:secret:ECS-API-heAdoB:DATABASE_URL::"
+                },
+                {
+                    "name": "ANALYTICS_DATABASE_URL",
+                    "valueFrom": "arn:aws:secretsmanager:eu-west-2:302456015006:secret:ECS-API-heAdoB:ANALYTICS_DATABASE_URL::"
                 }
             ],
             "logConfiguration": {

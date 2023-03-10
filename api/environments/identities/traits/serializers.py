@@ -21,7 +21,7 @@ class TraitSerializerFull(serializers.ModelSerializer):
 
 
 class TraitSerializerBasic(serializers.ModelSerializer):
-    trait_value = TraitValueField()
+    trait_value = TraitValueField(allow_null=True)
 
     class Meta:
         model = Trait
@@ -67,6 +67,14 @@ class IncrementTraitValueSerializer(serializers.Serializer):
     def _build_default_data(self):
         return {"value_type": INTEGER, "integer_value": 0}
 
+    def validate(self, attrs):
+        request = self.context["request"]
+        if not request.environment.trait_persistence_allowed(request):
+            raise serializers.ValidationError(
+                "Setting traits not allowed with client key."
+            )
+        return attrs
+
 
 class TraitKeysSerializer(serializers.Serializer):
     keys = serializers.ListSerializer(child=serializers.CharField())
@@ -80,3 +88,18 @@ class DeleteAllTraitKeysSerializer(serializers.Serializer):
         Trait.objects.filter(
             identity__environment=environment, trait_key=self.validated_data.get("key")
         ).delete()
+
+
+class TraitSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Trait
+        fields = (
+            "id",
+            "trait_key",
+            "value_type",
+            "integer_value",
+            "string_value",
+            "boolean_value",
+            "float_value",
+            "created_date",
+        )

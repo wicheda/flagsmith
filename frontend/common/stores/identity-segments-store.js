@@ -1,3 +1,4 @@
+const Dispatcher = require('../dispatcher/dispatcher');
 const BaseStore = require('./base/_store');
 const data = require('../data/base/_data');
 
@@ -8,7 +9,7 @@ const controller = {
         const endpoint = page || `${Project.api}projects/${projectId}/segments/?identity=${id}`;
         return data.get(endpoint)
             .then((res) => {
-                store.model = res.results && _.sortBy(res.results, r => r.name);
+                store.model[id] = res.results && _.sortBy(res.results, r => r.name);
                 store.paging.next = res.next;
                 store.paging.count = res.count;
                 store.paging.previous = res.previous;
@@ -23,10 +24,11 @@ const controller = {
 const store = Object.assign({}, BaseStore, {
     id: 'identity-segments',
     paging: {},
+    model: {},
 });
 
 store.dispatcherIndex = Dispatcher.register(store, (payload) => {
-    const action = payload.action; // this is our action from	handleViewAction
+    const action = payload.action; // this is our action from handleViewAction
     switch (action.actionType) {
         case Actions.GET_IDENTITY_SEGMENTS:
             controller.getIdentitySegments(action.projectId, action.id);

@@ -1,16 +1,12 @@
-module.exports = (envId, { LIB_NAME, USER_ID, LIB_NAME_JAVA, FEATURE_NAME, FEATURE_FUNCTION, FEATURE_NAME_ALT, FEATURE_NAME_ALT_VALUE, NPM_CLIENT }, userId) => `BulletTrainConfiguration configuration = new BulletTrainConfiguration()
-{
-    ApiUrl = "https://api.flagsmith.com/api/v1/",
-    EnvironmentKey = "${envId}"
-};
+module.exports = (envId, { FEATURE_NAME, FEATURE_NAME_ALT }, userId) => `using Flagsmith;
 
-// This will create a user in the dashboard if they don't already exist
-BulletTrainClient bulletClient = new BulletTrainClient(configuration);
+static FlagsmithClient _flagsmithClient;
+_flagsmithClient = new("${envId}");
 
-bool featureEnabled = await BulletTrainClient.instance
-    .HasFeatureFlag("${FEATURE_NAME}", "${USER_ID}");
-    
-string myRemoteConfig = await BulletTrainClient.instance
-    .GetFeatureValue("${FEATURE_NAME_ALT}", "${USER_ID}");
+// Identify the user
+var flags = await _flagsmithClient.GetIdentityFlags("${userId}");
 
+// get the state / value of the user's flags 
+var isEnabled = await flags.IsFeatureEnabled("${FEATURE_NAME}");
+var featureValue = await flags.GetFeatureValue("${FEATURE_NAME_ALT}");
 `;

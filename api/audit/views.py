@@ -4,6 +4,7 @@ from drf_yasg2 import openapi
 from drf_yasg2.utils import swagger_auto_schema
 from rest_framework import mixins, viewsets
 
+from app.pagination import CustomPagination
 from audit.models import AuditLog
 from audit.serializers import AuditLogSerializer, AuditLogsQueryParamSerializer
 
@@ -30,21 +31,27 @@ environment_query_param = openapi.Parameter(
 )
 class AuditLogViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     serializer_class = AuditLogSerializer
+    pagination_class = CustomPagination
+    filterset_fields = ["is_system_event"]
 
     def get_queryset(self):
-        q = Q(project__organisation__in=self.request.user.organisations.all())
+        q = Q(project__organisation__users=self.request.user) | Q(
+            environment__project__organisation__users=self.request.user
+        )
         serializer = AuditLogsQueryParamSerializer(data=self.request.GET)
         serializer.is_valid(raise_exception=True)
         project = serializer.data.get("project")
         environments = serializer.data.get("environments")
         if project:
-            q = q & Q(project__id=project)
+            q = q & (Q(project__id=project) | Q(environment__project__id=project))
         if environments:
-            q = q & (Q(environment__id__in=environments) | Q(environment=None))
+            q = q & Q(environment__id__in=environments)
 
         search = serializer.data.get("search")
         if search:
             q = q & Q(log__icontains=search)
-        return AuditLog.objects.filter(q).select_related(
-            "project", "environment", "author"
+        return (
+            AuditLog.objects.filter(q)
+            .distinct()
+            .select_related("project", "environment", "author")
         )

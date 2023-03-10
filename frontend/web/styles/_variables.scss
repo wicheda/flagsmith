@@ -25,14 +25,15 @@ $button-bg-dark-hover: darken($button-bg-dark,1);
 // COLORS
 
 $bt-brand-primary: #7B51FB;
-$bt-brand-primary-light: lighten($bt-brand-primary,40);
-$bt-brand-primary-lighter: lighten($bt-brand-primary,70);
+$bt-brand-primary-faint: #1d0d4d;
+//$bt-brand-primary-faint: #003100;
+$bt-brand-primary-light: lighten($bt-brand-primary,5);
 
 $bt-brand-primary-dark: #1E0D26;
 $bt-brand-primary-dark-alt: #17103A;
 $bt-brand-primary-dark-desaturated: #202040;
 $bt-brand-primary-dark-desaturated-light: #38386d;
-$bt-brand-primary-dark-desaturated-lighter: #5d60cc;
+$bt-brand-primary-dark-desaturated-lighter: #4e51be;
 $bt-brand-primary-dark-desaturated-lighter-dark: #131216;
 
 
@@ -40,10 +41,11 @@ $bt-brand-faint: #F8F8F7;
 $bt-brand-faint-alt: #F5F1ED;
 $bt-brand-faint-alt-darken: #DFD8CC;
 $bt-brand-faint-alt-dark: #1b1924;
-$bt-brand-faint-hover: #eee7f6;
+$bt-brand-faint-hover: #f8f2f8;
 $bt-brand-faint-hover-dark: #242230;
 
 
+$bt-brand-4: #F6D46E;
 $bt-brand-tertiary: #f18e7f;
 $bt-brand-tertiary-dark: $dark-highlight3;
 $bt-brand-secondary: #00a696;
@@ -169,7 +171,7 @@ $input-height: 40px;
 $input-line-height: 25px;
 $input-font-size: inherit;
 $input-font-weight: 400;
-$input-border-color: rgb(224, 224, 224);
+$input-border-color: #d9d9e9;
 $input-placeholder-color: rgb(224, 224, 224);
 $input-placeholder-color-dark: $header-color-dark;
 $input-border-highlight-color: $bt-brand-primary-light;
@@ -193,8 +195,8 @@ $panel-alt-heading-color: #fff;
 
 //TABS
 $tab-inactive-color: $body-text;
-$tab-active-background: $bt-brand-faint;
-$tab-inactive-background: $bt-brand-faint;
+$tab-active-background: $bt-brand-faint-alt;
+$tab-inactive-background: $bt-brand-faint-alt;
 $tab-inactive-color-dark: $header-color-dark;
 $tab-active-background-dark: $panel-heading-bg-dark;
 $tab-inactive-background-dark: $panel-heading-bg-dark;
@@ -236,7 +238,7 @@ $toast-color:white;
 
 $bold: 400;
 
-$card-default: 0 6px 13px 0 rgba(34,53,74,0.10);
+$card-default: 0 2px 13px 0 rgba(34,53,74,0.10);
 $card-default-dark: 0 6px 13px 0 rgba(0,0,0,0.10);
 
 
@@ -317,6 +319,10 @@ $aside-nav-collapse-border-dark:$aside-base-highlight-dark;
 
 
 // Aside scrollbar
-$bt-scrollbar-track: rgba(243,236,255,0.1);
-$bt-scrollbar-thumb: rgba(243, 236, 255, 0.2);
+$bt-scrollbar-track: rgba(0,0,0,0.1);
+$bt-scrollbar-thumb: rgba(0, 0, 0, 0.2);
 $bt-scrollbar-thumb-hover: rgba(243,236,255,0.6);
+
+$bt-scrollbar-track-dark: rgba(243,236,255,0.1);
+$bt-scrollbar-thumb-dark: rgba(243, 236, 255, 0.2);
+$bt-scrollbar-thumb-dark-hover: rgba(243,236,255,0.6);

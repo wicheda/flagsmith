@@ -1,5 +1,8 @@
 import React, { Component } from 'react';
 import CreateProjectModal from '../modals/CreateProject';
+import Permission from "common/providers/Permission";
+import ConfigProvider from 'common/providers/ConfigProvider';
+import Constants from 'common/constants';
 
 const ProjectSelectPage = class extends Component {
     static displayName = 'ProjectSelectPage';
@@ -145,7 +148,6 @@ const ProjectSelectPage = class extends Component {
                                           filterRow={(item, search) => item.name.toLowerCase().indexOf(search) > -1}
                                         />
                                     </FormGroup>
-
                                 </div>
                             )}
                         </div>

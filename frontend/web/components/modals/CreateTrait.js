@@ -1,16 +1,16 @@
 import React, { Component } from 'react';
 import Highlight from '../Highlight';
-import Constants from '../../../common/constants';
+import Constants from 'common/constants';
+import Format from "common/utils/format";
 
-const TRAITS_ID_MAXLENGTH = Constants.forms.maxLength.TRAITS_ID;
 
 const CreateTrait = class extends Component {
     static displayName = 'CreateTrait'
 
     constructor(props, context) {
         super(props, context);
-        const { props: { trait_key, trait_value } } = this;
-        this.state = { trait_key, trait_value };
+        const { props: { trait_key, trait_value, id } } = this;
+        this.state = { trait_key, trait_value, id };
     }
 
     close() {
@@ -40,9 +40,9 @@ const CreateTrait = class extends Component {
     }
 
     render() {
-        const { props: { isEdit, identity, environmentId, projectId } } = this;
-        const { state: { trait_key, trait_value, error, isSaving } } = this;
-        const x = 'test3';
+        const { props: { isEdit, identity, projectId } } = this;
+        const { state: { trait_key, trait_value } } = this;
+        const TRAITS_ID_MAXLENGTH = Constants.forms.maxLength.TRAITS_ID;
 
         return (
             <ProjectProvider
@@ -50,12 +50,12 @@ const CreateTrait = class extends Component {
             >
                 {({ project }) => (
                     <IdentityProvider onSave={this.onSave}>
-                        {({ isLoading, isSaving, error }, { editTrait }) => (
+                        {({ isLoading, isSaving, error }, { createTrait }) => (
                             <form
                               id="create-trait-modal"
                               onSubmit={(e) => {
                                   e.preventDefault();
-                                  this.save(editTrait, isSaving);
+                                  this.save(createTrait, isSaving);
                               }}
                             >
                                 <FormGroup className="mb-3">
@@ -114,7 +114,7 @@ const CreateTrait = class extends Component {
 
                                 <FormGroup className="flag-example">
                                     <strong>Example SDK response:</strong>
-                                    <Highlight className="json no-pad">
+                                    <Highlight forceExpanded className="json no-pad">
                                         {JSON.stringify({ trait_key, trait_value })}
                                     </Highlight>
                                 </FormGroup>
@@ -139,10 +139,10 @@ const CreateTrait = class extends Component {
     }
 
     save = (func, isSaving) => {
-        const { props: { identity, environmentId }, state: { trait_key, trait_value } } = this;
+        const { props: { identity, environmentId }, state: { trait_key, trait_value, id } } = this;
         func({
             identity,
-            trait: { trait_value, trait_key },
+            trait: { trait_value, trait_key, id },
             environmentId,
         });
     }

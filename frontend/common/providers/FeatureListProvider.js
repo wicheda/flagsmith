@@ -1,7 +1,7 @@
-import React, { Component } from 'react';
-import FeatureListStore from '../stores/feature-list-store';
+import React from 'react';
+import FeatureListStore from 'common/stores/feature-list-store';
 
-const FeatureListProvider = class extends Component {
+const FeatureListProvider = class extends React.Component {
     static displayName = 'FeatureListProvider'
 
     constructor(props, context) {
@@ -20,6 +20,7 @@ const FeatureListProvider = class extends Component {
                 isSaving: FeatureListStore.isSaving,
                 isLoading: FeatureListStore.isLoading,
                 environmentFlags: FeatureListStore.getEnvironmentFlags(),
+                error: FeatureListStore.error,
                 lastSaved: FeatureListStore.getLastSaved(),
                 projectFlags: FeatureListStore.getProjectFlags(),
                 influxData: FeatureListStore.getFlagInfluxData(),
@@ -42,20 +43,16 @@ const FeatureListProvider = class extends Component {
         });
     }
 
-    toggleFlag = (i, environments, comment, environmentFlags) => {
-        AppActions.toggleFlag(i, environments, comment,environmentFlags);
-    };
-
-    setFlag = (i, flag, environments) => {
-        AppActions.setFlag(i, flag, environments);
+    toggleFlag = (i, environments, comment, environmentFlags, projectFlags) => {
+        AppActions.toggleFlag(i, environments, comment, environmentFlags, projectFlags);
     };
 
     createFlag = (projectId, environmentId, flag, projectFlag, environmentFlag, segmentOverrides) => {
         AppActions.createFlag(projectId, environmentId, flag, segmentOverrides);
     };
 
-    editFlag = (projectId, environmentId, flag, projectFlag, environmentFlag, segmentOverrides) => {
-        AppActions.editFlag(projectId, Object.assign({}, projectFlag, flag, {
+    editFeatureValue = (projectId, environmentId, flag, projectFlag, environmentFlag) => {
+        AppActions.editFeatureMv(projectId, Object.assign({}, projectFlag, {
             multivariate_options: flag.multivariate_options && flag.multivariate_options.map((v) => {
                 const matchingProjectVariate = (projectFlag.multivariate_options && projectFlag.multivariate_options.find(p => p.id === v.id)) || v;
                 return {
@@ -66,8 +63,48 @@ const FeatureListProvider = class extends Component {
         }), (newProjectFlag) => {
             AppActions.editEnvironmentFlag(projectId, environmentId, flag, newProjectFlag, {
                 ...environmentFlag,
+                multivariate_feature_state_values: newProjectFlag.multivariate_options.map((v, i) => ({ ...flag.multivariate_options[i], id: v.id })),
+            }, null, 'VALUE');
+        });
+    };
+
+    editFeatureSegments = (projectId, environmentId, flag, projectFlag, environmentFlag, segmentOverrides, onComplete) => {
+        AppActions.editEnvironmentFlag(projectId, environmentId, flag, projectFlag, {
+            ...environmentFlag,
+            multivariate_feature_state_values: flag.multivariate_options,
+        }, segmentOverrides, 'SEGMENT', onComplete);
+    };
+
+    editFeatureSettings = (projectId, environmentId, flag, projectFlag) => {
+        AppActions.editFeature(projectId, Object.assign({}, projectFlag, flag, {
+            multivariate_options: flag.multivariate_options && flag.multivariate_options.map((v) => {
+                const matchingProjectVariate = (projectFlag.multivariate_options && projectFlag.multivariate_options.find(p => p.id === v.id)) || v;
+                return {
+                    ...v,
+                    default_percentage_allocation: matchingProjectVariate.default_percentage_allocation,
+                };
+            }),
+        }), () => {
+            FeatureListStore.isSaving = false;
+            FeatureListStore.trigger('saved');
+            FeatureListStore.trigger('change');
+        });
+    };
+
+    createChangeRequest = (projectId, environmentId, flag, projectFlag, environmentFlag, segmentOverrides, changeRequest, commit) => {
+        AppActions.editFeatureMv(projectId, Object.assign({}, projectFlag, flag, {
+            multivariate_options: flag.multivariate_options && flag.multivariate_options.map((v) => {
+                const matchingProjectVariate = (projectFlag.multivariate_options && projectFlag.multivariate_options.find(p => p.id === v.id)) || v;
+                return {
+                    ...v,
+                    default_percentage_allocation: matchingProjectVariate.default_percentage_allocation,
+                };
+            }),
+        }), (newProjectFlag) => {
+            AppActions.editEnvironmentFlagChangeRequest(projectId, environmentId, flag, newProjectFlag, {
+                ...environmentFlag,
                 multivariate_feature_state_values: flag.multivariate_options,
-            }, segmentOverrides);
+            }, segmentOverrides, changeRequest, commit);
         });
     };
 
@@ -84,9 +121,11 @@ const FeatureListProvider = class extends Component {
                 {
                     environmentHasFlag: FeatureListStore.hasFlagInEnvironment,
                     toggleFlag: this.toggleFlag,
-                    setFlag: this.setFlag,
                     createFlag: this.createFlag,
-                    editFlag: this.editFlag,
+                    createChangeRequest: this.createChangeRequest,
+                    editFeatureValue: this.editFeatureValue,
+                    editFeatureSettings: this.editFeatureSettings,
+                    editFeatureSegments: this.editFeatureSegments,
                     removeFlag: this.removeFlag,
                 },
             )
@@ -94,6 +133,10 @@ const FeatureListProvider = class extends Component {
     }
 };
 
-FeatureListProvider.propTypes = {};
+FeatureListProvider.propTypes = {
+    onSave: OptionalFunc,
+    onError: OptionalFunc,
+    children: OptionalFunc,
+};
 
 module.exports = FeatureListProvider;

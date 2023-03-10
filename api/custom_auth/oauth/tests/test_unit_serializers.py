@@ -35,7 +35,8 @@ class OAuthLoginSerializerTestCase(TestCase):
     def test_create(self, mock_get_user_info):
         # Given
         access_token = "access-token"
-        data = {"access_token": access_token}
+        sign_up_type = "NO_INVITE"
+        data = {"access_token": access_token, "sign_up_type": sign_up_type}
         serializer = OAuthLoginSerializer(data=data, context={"request": self.request})
 
         # monkey patch the get_user_info method to return the mock user data
@@ -46,7 +47,9 @@ class OAuthLoginSerializerTestCase(TestCase):
         response = serializer.save()
 
         # Then
-        assert UserModel.objects.filter(email=self.test_email).exists()
+        assert UserModel.objects.filter(
+            email=self.test_email, sign_up_type=sign_up_type
+        ).exists()
         assert isinstance(response, Token)
         assert (timezone.now() - response.user.last_login).seconds < 5
         assert response.user.email == self.test_email
@@ -96,3 +99,35 @@ class GithubLoginSerializerTestCase(TestCase):
         # Then
         MockGithubUser.assert_called_with(code=access_token)
         mock_github_user.get_user_info.assert_called()
+
+
+def test_OAuthLoginSerializer_calls_is_authentication_method_valid_correctly_if_auth_controller_is_installed(
+    settings, rf, mocker, db
+):
+    # Given
+    settings.AUTH_CONTROLLER_INSTALLED = True
+
+    request = rf.post("/some-login/url")
+    user_email = "test_user@test.com"
+    mocked_auth_controller = mocker.MagicMock()
+    mocker.patch.dict(
+        "sys.modules", {"auth_controller.controller": mocked_auth_controller}
+    )
+
+    serializer = OAuthLoginSerializer(
+        data={"access_token": "some_token"}, context={"request": request}
+    )
+    # monkey patch the get_user_info method to return the mock user data
+    serializer.get_user_info = lambda: {"email": user_email}
+
+    serializer.is_valid(raise_exception=True)
+
+    # When
+    serializer.save()
+
+    # Then
+    mocked_auth_controller.is_authentication_method_valid.assert_called_with(
+        request,
+        email=user_email,
+        raise_exception=True,
+    )

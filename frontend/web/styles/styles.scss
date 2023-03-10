@@ -10,9 +10,13 @@
   text-align: center;
   line-height: 44px;
   margin-top: -10px;
-
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
-
+.display-none {
+  display: none !important;
+}
 .dark .butter-bar {
   background-color: $butter-bar-bg-dark;
   color: $header-color-dark;
@@ -32,8 +36,28 @@ bold, strong {
 }
 
 .value-editor {
-
+  &.disabled {
+    code {
+      background: $input-placeholder-color !important;
+    }
+    .select-language {
+      display: none;
+    }
+  }
 }
+.dark {
+  .value-editor {
+    &.disabled {
+      code {
+        cursor: not-allowed;
+        color: $dark-color;
+        background: $dark-bg-20 !important;
+      }
+    }
+  }
+}
+
+
 
 .faint-lg {
   color: $text-muted;
@@ -65,6 +89,9 @@ bold, strong {
 
 .cursor-pointer {
   cursor: pointer;
+}
+.cursor-default {
+  cursor: default;
 }
 
 .gif {
@@ -291,4 +318,8 @@ hr {
     display: inline-block;
     box-shadow: rgba(75, 75, 75, 0.21) 0px 1px 6px, rgba(75, 75, 75, 0.21) 0px 1px 4px;
   }
+}
+
+.flag-select__menu {
+  z-index: 3 !important;
 }

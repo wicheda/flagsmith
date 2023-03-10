@@ -1,16 +1,16 @@
+from core.helpers import get_current_site_url
+from core.models import AbstractBaseExportableModel
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.db import models
 from django.template.loader import get_template
 from django.utils import timezone
+from django_lifecycle import BEFORE_CREATE, LifecycleModelMixin, hook
 
 from app.utils import create_hash
-from organisations.models import (
-    Organisation,
-    OrganisationRole,
-    organisation_roles,
-)
-from users.models import FFAdminUser
+from organisations.invites.exceptions import InviteLinksDisabledError
+from organisations.models import Organisation, OrganisationRole
+from users.models import FFAdminUser, UserPermissionGroup
 
 
 class AbstractBaseInviteModel(models.Model):
@@ -18,14 +18,18 @@ class AbstractBaseInviteModel(models.Model):
     date_created = models.DateTimeField("DateCreated", auto_now_add=True)
     organisation = models.ForeignKey(Organisation, on_delete=models.CASCADE)
     role = models.CharField(
-        choices=organisation_roles, max_length=50, default=OrganisationRole.USER.name
+        choices=OrganisationRole.choices,
+        max_length=50,
+        default=OrganisationRole.USER,
     )
 
     class Meta:
         abstract = True
 
 
-class InviteLink(AbstractBaseInviteModel):
+class InviteLink(
+    LifecycleModelMixin, AbstractBaseInviteModel, AbstractBaseExportableModel
+):
     expires_at = models.DateTimeField(
         blank=True,
         null=True,
@@ -37,13 +41,18 @@ class InviteLink(AbstractBaseInviteModel):
     def is_expired(self):
         return self.expires_at is not None and timezone.now() > self.expires_at
 
+    @hook(BEFORE_CREATE)
+    def validate_invite_links_are_enabled(self):
+        if settings.DISABLE_INVITE_LINKS:
+            raise InviteLinksDisabledError()
+
 
 class Invite(AbstractBaseInviteModel):
     email = models.EmailField()
     invited_by = models.ForeignKey(
         FFAdminUser, related_name="sent_invites", null=True, on_delete=models.CASCADE
     )
-    frontend_base_url = models.CharField(max_length=500, null=False)
+    permission_groups = models.ManyToManyField(UserPermissionGroup, blank=True)
 
     class Meta:
         unique_together = ("email", "organisation")
@@ -57,7 +66,7 @@ class Invite(AbstractBaseInviteModel):
         super(Invite, self).save(*args, **kwargs)
 
     def get_invite_uri(self):
-        return "%s%s" % (self.frontend_base_url, str(self.hash))
+        return f"{get_current_site_url()}/invite/{str(self.hash)}"
 
     def send_invite_mail(self):
         context = {

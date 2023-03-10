@@ -1,6 +1,6 @@
 import React, { Component } from 'react';
-import Popover from './base/Popover';
 import { FixedSizeList as List } from 'react-window';
+import Popover from './base/Popover';
 
 const PanelSearch = class extends Component {
     static displayName = 'PanelSearch'
@@ -31,14 +31,14 @@ const PanelSearch = class extends Component {
     }
 
     filter() {
-        let search = this.props.search || this.state.search || "";
+        let search = this.props.search || this.state.search || '';
         if (this.state.exact) {
             search = search.replace(/^"+|"+$/g, '');
         }
         const filter = this.props.filter;
         const { items, filterRow } = this.props;
         if (filterRow && (search || filter)) {
-            return this.sort(_.filter(items, i => filterRow(i, search.toLowerCase())));
+            return this.sort(_.filter(items, (value, index) => filterRow(value, search.toLowerCase(), index)));
         }
         return this.sort(items);
     }
@@ -56,46 +56,53 @@ const PanelSearch = class extends Component {
         e.preventDefault();
         const { sortBy, sortOrder } = this.state;
         if (sortOption.value === sortBy) {
-            this.setState({ sortOrder: sortOrder === 'asc' ? 'desc' : 'asc' });
+            this.setState({ sortOrder: sortOrder === 'asc' ? 'desc' : 'asc' }, () => {
+                if (this.props.onSortChange) {
+                    this.props.onSortChange({ sortBy: this.state.sortBy, sortOrder: this.state.sortOrder });
+                }
+            });
         } else {
-            this.setState({ sortBy: sortOption.value, sortOrder: sortOption.order });
+            this.setState({ sortBy: sortOption.value, sortOrder: sortOption.order }, () => {
+                if (this.props.onSortChange) {
+                    this.props.onSortChange({ sortBy: this.state.sortBy, sortOrder: this.state.sortOrder });
+                }
+            });
         }
     }
 
     renderContainer = (children) => {
-        const renderRow = ({index,style})=> (
+        const renderRow = ({ index, style }) => (
             <div style={style}>
                 {this.props.renderRow(children[index])}
             </div>
-        )
-        if(children && children.length > 100 && this.props.itemHeight) {
+        );
+        if (children && children.length > 100 && this.props.itemHeight) {
             return (
                 <List
-                    style={{overflowX:"hidden"}}
-                    height={this.props.itemHeight*10}
-                    itemCount={children.length}
-                    itemSize={this.props.itemHeight}
-                    width="100%"
+                  style={{ overflowX: 'hidden' }}
+                  height={this.props.itemHeight * 10}
+                  itemCount={children.length}
+                  itemSize={this.props.itemHeight}
+                  width="100%"
                 >
                     {renderRow}
                 </List>
-            )
-        } else {
-            return children.map(this.props.renderRow)
+            );
         }
+        return children.map(this.props.renderRow);
     }
 
     render() {
         const { sortBy, sortOrder } = this.state;
-        const { title, items, renderRow, renderNoResults, paging, goToPage, isLoading, sorting, action } = this.props;
+        const { title, items, renderRow, renderNoResults, paging, prevPage, nextPage, goToPage, isLoading, sorting, action } = this.props;
         const filteredItems = this.filter(items);
         const currentSort = _.find(sorting, { value: sortBy });
 
-        let search = this.props.search || this.state.search || "";
+        let search = this.props.search || this.state.search || '';
         if (this.state.exact) {
             search = search.replace(/^"+|"+$/g, '');
         }
-        return (!search && (!filteredItems || !filteredItems.length)) && !this.props.renderSearchWithNoResults ? renderNoResults : (
+        return (!search && (!filteredItems || !filteredItems.length)) && !this.props.isLoading && !this.props.renderSearchWithNoResults ? renderNoResults || null : (
             <Panel
               className={this.props.className}
               title={this.props.title}
@@ -164,10 +171,10 @@ const PanelSearch = class extends Component {
                                                 this.props.onChange && this.props.onChange(!this.state.exact ? `"${this.props.search}"` : this.props.search.replace(/^"+|"+$/g, ''));
                                             }
                                         }}
-                                        value={{ label: this.state.exact ? 'Exact' : 'Contains' }}
+                                        value={{ label: this.state.exact ? 'Exact' : this.props.filterLabel || (Utils.getIsEdge() ? 'Starts with' : 'Contains') }}
                                         options={[
                                             {
-                                                label: 'Contains',
+                                                label: Utils.getIsEdge() ? 'Starts with' : 'Contains',
                                                 value: 'Contains',
                                             },
                                             {
@@ -194,38 +201,44 @@ const PanelSearch = class extends Component {
                                   <span style={{ marginLeft: 10, position: 'absolute' }} className="icon ion-ios-search" />
                               </Row>
                           </Row>
-
                       )}
                   </Row>
               ) : action || null}
             >
-                {!!paging && (
-                <Paging
-                  paging={paging}
-                  isLoading={isLoading}
-                  goToPage={goToPage}
-                />
-                )}
+
                 {this.props.searchPanel}
                 <div id={this.props.id} className="search-list" style={isLoading ? { opacity: 0.5 } : {}}>
+                    {!!paging && (
+                        <Paging
+                          paging={paging}
+                          isLoading={isLoading}
+                          nextPage={nextPage}
+                          prevPage={prevPage}
+                          goToPage={goToPage}
+                        />
+                    )}
                     {this.props.header}
-                    {this.props.isLoading && <div className="text-center"><Loader/></div> }
-                    {!this.props.isLoading && filteredItems && filteredItems.length
-                        ? this.renderContainer(filteredItems) : (renderNoResults && !search) ? renderNoResults : (
-                            <Column>
-                                <div className="mx-2 mb-2">
-                                    {'No results '}
-                                    {search && (
-                                    <span>
-                                    for
-                                        <strong>
-                                            {` "${search}"`}
-                                        </strong>
-                                    </span>
+
+                    {this.props.isLoading && (!filteredItems || !items) ? <div className="text-center"><Loader/></div>
+                        : filteredItems && filteredItems.length
+                            ? this.renderContainer(filteredItems) : (renderNoResults && !search) ? renderNoResults : (
+                                <Column>
+                                    {!isLoading && (
+                                        <div className="mx-2 mt-1 mb-2">
+                                            {'No results '}
+                                            {search && (
+                                                <span>
+                                                    for
+                                                    <strong>
+                                                        {` "${search}"`}
+                                                    </strong>
+                                                </span>
+                                            )}
+                                        </div>
                                     )}
-                                </div>
-                            </Column>
-                        )}
+                                </Column>
+                            )
+                    }
                 </div>
                 {!!paging && filteredItems && filteredItems.length > 10 && (
                 <Paging
@@ -238,5 +251,4 @@ const PanelSearch = class extends Component {
         );
     }
 };
-
-module.exports = PanelSearch;
+export default PanelSearch

@@ -1,6 +1,7 @@
 import React, { Component } from 'react';
 import IntegrationList from '../IntegrationList';
-
+import Permission from "common/providers/Permission";
+import Constants from 'common/constants';
 
 const ProjectSettingsPage = class extends Component {
     static displayName = 'ProjectSettingsPage'
@@ -19,7 +20,7 @@ const ProjectSettingsPage = class extends Component {
     };
 
     render() {
-        let integrations = this.props.getValue('integrations') || '[]';
+        let integrations = Utils.getFlagsmithValue('integrations') || '[]';
         try {
             integrations = JSON.parse(integrations).sort();
         } catch (e) {
@@ -68,4 +69,4 @@ const ProjectSettingsPage = class extends Component {
 
 ProjectSettingsPage.propTypes = {};
 
-module.exports = hot(module)(ConfigProvider(ProjectSettingsPage));
+module.exports = (ProjectSettingsPage);

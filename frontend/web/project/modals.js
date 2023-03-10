@@ -1,14 +1,39 @@
 import { render } from 'react-dom';
 import React from 'react';
+import { getStore } from "../../common/store";
+import { Provider } from "react-redux";
 
-const Provider = class extends React.Component {
+let interceptClose;
+export const setInterceptClose = (fn) => {
+    interceptClose = fn;
+};
+const ModalProvider = class extends React.Component {
     componentDidMount() {
         if (this.props.type !== 'confirm') {
-            window.closeModal = this.close;
+            if (this.props.isModal2) {
+                window.closeModal2 = this.close;
+            } else {
+                window.closeModal = this.close;
+            }
         }
         $(ReactDOM.findDOMNode(this)).on('hidden.bs.modal', this._closed);
         $(ReactDOM.findDOMNode(this)).on('shown.bs.modal', this._shown);
-        $(ReactDOM.findDOMNode(this)).modal({ background: true, keyboard: true, show: true });
+        $(ReactDOM.findDOMNode(this)).modal({ background: true, show: true });
+        if (this.props.addCloseInterception) {
+            $(ReactDOM.findDOMNode(this)).on('hide.bs.modal', function (e) {
+                if (interceptClose) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    interceptClose().then((res) => {
+                        if (res) {
+                            interceptClose = null;
+                            $(ReactDOM.findDOMNode(this)).modal('hide');
+                        }
+                    });
+                    return false;
+                }
+            });
+        }
     }
 
     show() {
@@ -18,25 +43,28 @@ const Provider = class extends React.Component {
     }
 
   close = () => { // use when you wish to trigger closing manually
+      if (this.props.onClose) {
+          this.props.onClose();
+      }
       $(ReactDOM.findDOMNode(this)).off('hidden.bs.modal', this._closed);
       $(ReactDOM.findDOMNode(this)).off('shown.bs.modal', this._shown);
       if (!E2E) {
           $(ReactDOM.findDOMNode(this)).modal('hide');
           setTimeout(() => {
-              ReactDOM.unmountComponentAtNode(document.getElementById(this.props.type == 'confirm' ? 'confirm' : 'modal'));
+              ReactDOM.unmountComponentAtNode(document.getElementById(this.props.type == 'confirm' ? 'confirm' : this.props.isModal2 ? 'modal2' : 'modal'));
               document.body.classList.remove('modal-open');
           }, E2E ? 0 : 500);
       } else {
           // for e2e we disable any animations and immediately remove from the DOM
           $('.modal-backdrop').remove();
-          ReactDOM.unmountComponentAtNode(document.getElementById(this.props.type == 'confirm' ? 'confirm' : 'modal'));
+          ReactDOM.unmountComponentAtNode(document.getElementById(this.props.type == 'confirm' ? 'confirm' : this.props.isModal2 ? 'modal2' : 'modal'));
           document.body.classList.remove('modal-open');
       }
   }
 
   _closed = () => {
       this.props.onClose && this.props.onClose();
-      ReactDOM.unmountComponentAtNode(document.getElementById(this.props.type == 'confirm' ? 'confirm' : 'modal'));
+      ReactDOM.unmountComponentAtNode(document.getElementById(this.props.type == 'confirm' ? 'confirm' : this.props.isModal2 ? 'modal2' : 'modal'));
       document.body.classList.remove('modal-open');
   }
 
@@ -45,11 +73,16 @@ const Provider = class extends React.Component {
   }
 
   render() {
-      return this.props.children;
+      return (
+          <Provider store={getStore()}>
+              {this.props.children}
+          </Provider>
+      )
+
   }
 };
 
-Provider.propTypes = {
+ModalProvider.propTypes = {
     children: RequiredElement,
     onClose: OptionalFunc,
 };
@@ -68,12 +101,19 @@ const Modal = class extends React.Component {
     }
 
   close = () => {
-      closeModal();
+      if (this.props.isModal2) {
+          closeModal2();
+      } else {
+          closeModal();
+      }
   }
 
   render() {
       return (
-          <Provider ref="modal">
+          <ModalProvider
+            addCloseInterception onClose={this.props.onClose} isModal2={this.props.isModal2}
+            ref="modal"
+          >
               <div
                 tabIndex="-1" className={`modal ${E2E ? 'transition-none ' : ''}${this.props.className ? this.props.className : 'alert fade expand'}`} role="dialog"
                 aria-hidden="true"
@@ -82,19 +122,20 @@ const Modal = class extends React.Component {
                       <div className="modal-content">
                           <div className="modal-header">
                               {this.header()}
-                              {isMobile && (
+                              {isMobile ? (
                               <button onClick={() => this.refs.modal.close()} className="modal-close-btn">
                                   <span className="icon ion-md-close"/>
                               </button>
+                              ): (
+                                  <span onClick={this.close} className="icon close ion-md-close"/>
                               )}
-                              <span onClick={this.close} className="icon close ion-md-close"/>
                           </div>
                           <div className="modal-body">{this.body()}</div>
                           <div className="modal-footer">{this.footer()}</div>
                       </div>
                   </div>
               </div>
-          </Provider>
+          </ModalProvider>
       );
   }
 };
@@ -159,7 +200,7 @@ const Confirm = class extends React.Component {
 
   render() {
       return (
-          <Provider onClose={this.props.onNo} ref="modal" type="confirm">
+          <ModalProvider onClose={this.props.onNo} ref="modal" type="confirm">
               <div
                 tabIndex="-1" className="modal alert modal-confirm fade expand" role="dialog"
                 aria-hidden="true"
@@ -172,7 +213,7 @@ const Confirm = class extends React.Component {
                       </div>
                   </div>
               </div>
-          </Provider>
+          </ModalProvider>
       );
   }
 };
@@ -193,9 +234,17 @@ exports.openModal = (header, body, footer, other) => {
     />, document.getElementById('modal'));
 };
 
-exports.openConfirm = (header, body, onYes, onNo) => {
+exports.openModal2 = (header, body, footer, other) => {
+    render(<Modal
+      isModal2
+      header={header} footer={footer} body={body}
+      {...other}
+    />, document.getElementById('modal2'));
+};
+
+exports.openConfirm = (header, body, onYes, onNo, yesText, noText) => {
     render(<Confirm
       header={header} onYes={onYes} onNo={onNo}
-      body={body}
+      body={body} yesText={yesText} noText={noText}
     />, document.getElementById('confirm'));
 };

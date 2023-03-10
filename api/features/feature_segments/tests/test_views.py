@@ -1,165 +1,273 @@
 import json
-from unittest.case import TestCase
 
 import pytest
 from django.urls import reverse
+from pytest_lazyfixture import lazy_fixture
 from rest_framework import status
-from rest_framework.test import APIClient
 
-from audit.models import AuditLog, RelatedObjectType
 from environments.models import Environment
 from features.models import Feature, FeatureSegment
-from organisations.models import Organisation, OrganisationRole
-from projects.models import Project
 from segments.models import Segment
-from util.tests import Helper
 
 
-@pytest.mark.django_db
-class FeatureSegmentViewSetTestCase(TestCase):
-    def setUp(self) -> None:
-        self.client = APIClient()
-        user = Helper.create_ffadminuser()
-        self.client.force_authenticate(user=user)
+@pytest.mark.parametrize(
+    "client, num_queries",
+    [
+        (lazy_fixture("admin_client"), 2),  # 1 for paging, 1 for result
+        (lazy_fixture("master_api_key_client"), 3),  # an extra one for master_api_key
+    ],
+)
+def test_list_feature_segments(
+    segment,
+    feature,
+    environment,
+    project,
+    django_assert_num_queries,
+    client,
+    feature_segment,
+    num_queries,
+):
+    # Given
+    base_url = reverse("api-v1:features:feature-segment-list")
+    url = f"{base_url}?environment={environment.id}&feature={feature.id}"
+    environment_2 = Environment.objects.create(
+        project=project, name="Test environment 2"
+    )
+    segment_2 = Segment.objects.create(project=project, name="Segment 2")
+    segment_3 = Segment.objects.create(project=project, name="Segment 3")
 
-        organisation = Organisation.objects.create(name="Test Org")
+    FeatureSegment.objects.create(
+        feature=feature, segment=segment_2, environment=environment
+    )
+    FeatureSegment.objects.create(
+        feature=feature, segment=segment_3, environment=environment
+    )
+    FeatureSegment.objects.create(
+        feature=feature, segment=segment, environment=environment_2
+    )
 
-        user.add_organisation(organisation, OrganisationRole.ADMIN)
+    # When
+    with django_assert_num_queries(num_queries):
+        response = client.get(url)
 
-        self.project = Project.objects.create(
-            organisation=organisation, name="Test project"
-        )
-        self.environment_1 = Environment.objects.create(
-            project=self.project, name="Test environment 1"
-        )
-        self.environment_2 = Environment.objects.create(
-            project=self.project, name="Test environment 2"
-        )
-        self.feature = Feature.objects.create(project=self.project, name="Test feature")
-        self.segment = Segment.objects.create(project=self.project, name="Test segment")
+    # Then
+    assert response.status_code == status.HTTP_200_OK
+    response_json = response.json()
+    assert response_json["count"] == 3
+    for result in response_json["results"]:
+        assert result["environment"] == environment.id
+        assert "uuid" in result
+        assert "segment_name" in result
+        assert not result["is_feature_specific"]
 
-    def test_list_feature_segments(self):
-        # Given
-        base_url = reverse("api-v1:features:feature-segment-list")
-        url = (
-            f"{base_url}?environment={self.environment_1.id}&feature={self.feature.id}"
-        )
-        segment_2 = Segment.objects.create(project=self.project, name="Segment 2")
-        segment_3 = Segment.objects.create(project=self.project, name="Segment 3")
 
-        FeatureSegment.objects.create(
-            feature=self.feature, segment=self.segment, environment=self.environment_1
-        )
-        FeatureSegment.objects.create(
-            feature=self.feature, segment=segment_2, environment=self.environment_1
-        )
-        FeatureSegment.objects.create(
-            feature=self.feature, segment=segment_3, environment=self.environment_1
-        )
-        FeatureSegment.objects.create(
-            feature=self.feature, segment=self.segment, environment=self.environment_2
-        )
+@pytest.mark.parametrize(
+    "client",
+    [lazy_fixture("admin_client"), lazy_fixture("master_api_key_client")],
+)
+def test_list_feature_segments_is_feature_specific(
+    segment,
+    feature,
+    environment,
+    project,
+    client,
+):
+    # Given
+    base_url = reverse("api-v1:features:feature-segment-list")
+    url = f"{base_url}?environment={environment.id}&feature={feature.id}"
 
-        # When
-        response = self.client.get(url)
+    segment = Segment.objects.create(
+        project=project, name="Test segment", feature=feature
+    )
+    FeatureSegment.objects.create(
+        feature=feature, segment=segment, environment=environment
+    )
 
-        # Then
-        assert response.status_code == status.HTTP_200_OK
-        response_json = response.json()
-        assert response_json["count"] == 3
-        for result in response_json["results"]:
-            assert result["environment"] == self.environment_1.id
+    # When
+    response = client.get(url)
 
-    def test_create_feature_segment(self):
-        # Given
-        data = {
-            "feature": self.feature.id,
-            "segment": self.segment.id,
-            "environment": self.environment_1.id,
-        }
-        url = reverse("api-v1:features:feature-segment-list")
+    # Then
+    assert response.status_code == status.HTTP_200_OK
+    response_json = response.json()
+    assert response_json["count"] == 1
+    assert response_json["results"][0]["is_feature_specific"]
 
-        # When
-        response = self.client.post(
-            url, data=json.dumps(data), content_type="application/json"
-        )
 
-        # Then
-        assert response.status_code == status.HTTP_201_CREATED
-        response_json = response.json()
-        assert response_json["id"]
+@pytest.mark.parametrize(
+    "client", [lazy_fixture("master_api_key_client"), lazy_fixture("admin_client")]
+)
+def test_create_feature_segment(segment, feature, environment, client):
+    # Given
+    data = {
+        "feature": feature.id,
+        "segment": segment.id,
+        "environment": environment.id,
+    }
+    url = reverse("api-v1:features:feature-segment-list")
 
-    def test_delete_feature_segment(self):
-        # Given
-        feature_segment = FeatureSegment.objects.create(
-            feature=self.feature, environment=self.environment_1, segment=self.segment
-        )
-        url = reverse(
-            "api-v1:features:feature-segment-detail", args=[feature_segment.id]
-        )
+    # When
+    response = client.post(url, data=json.dumps(data), content_type="application/json")
 
-        # When
-        response = self.client.delete(url)
+    # Then
+    assert response.status_code == status.HTTP_201_CREATED
+    response_json = response.json()
+    assert response_json["id"]
 
-        # Then
-        assert response.status_code == status.HTTP_204_NO_CONTENT
-        assert not FeatureSegment.objects.filter(id=feature_segment.id).exists()
 
-    def test_audit_log_created_when_feature_segment_created(self):
-        # Given
-        url = reverse("api-v1:features:feature-segment-list")
-        data = {
-            "segment": self.segment.id,
-            "feature": self.feature.id,
-            "environment": self.environment_1.id,
-        }
+@pytest.mark.parametrize(
+    "client", [lazy_fixture("master_api_key_client"), lazy_fixture("admin_client")]
+)
+def test_delete_feature_segment(segment, feature, environment, client):
+    # Given
+    feature_segment = FeatureSegment.objects.create(
+        feature=feature, environment=environment, segment=segment
+    )
+    url = reverse("api-v1:features:feature-segment-detail", args=[feature_segment.id])
 
-        # When
-        response = self.client.post(url, data=data)
+    # When
+    response = client.delete(url)
 
-        # Then
-        assert response.status_code == status.HTTP_201_CREATED
-        assert (
-            AuditLog.objects.filter(
-                related_object_type=RelatedObjectType.FEATURE.name
-            ).count()
-            == 1
-        )
+    # Then
+    assert response.status_code == status.HTTP_204_NO_CONTENT
+    assert not FeatureSegment.objects.filter(id=feature_segment.id).exists()
 
-    def test_priority_of_multiple_feature_segments(self):
-        # Given
-        url = reverse("api-v1:features:feature-segment-update-priorities")
 
-        # another segment and 2 feature segments for the same feature / the 2 segments
-        another_segment = Segment.objects.create(
-            name="Another segment", project=self.project
-        )
-        feature_segment_default_data = {
-            "environment": self.environment_1,
-            "feature": self.feature,
-        }
-        feature_segment_1 = FeatureSegment.objects.create(
-            segment=self.segment, **feature_segment_default_data
-        )
-        feature_segment_2 = FeatureSegment.objects.create(
-            segment=another_segment, **feature_segment_default_data
-        )
+@pytest.mark.parametrize(
+    "client", [lazy_fixture("master_api_key_client"), lazy_fixture("admin_client")]
+)
+def test_priority_of_multiple_feature_segments(
+    feature_segment,
+    project,
+    client,
+    environment,
+    feature,
+    admin_user,
+    master_api_key,
+):
+    # Given
+    url = reverse("api-v1:features:feature-segment-update-priorities")
 
-        # reorder the feature segments
-        assert feature_segment_1.priority == 0
-        assert feature_segment_2.priority == 1
-        data = [
-            {"id": feature_segment_1.id, "priority": 1},
-            {"id": feature_segment_2.id, "priority": 0},
-        ]
+    # another segment and feature segments for the same feature
+    another_segment = Segment.objects.create(name="Another segment", project=project)
+    another_feature_segment = FeatureSegment.objects.create(
+        segment=another_segment, environment=environment, feature=feature
+    )
 
-        # When
-        response = self.client.post(
-            url, data=json.dumps(data), content_type="application/json"
-        )
+    # reorder the feature segments
+    assert feature_segment.priority == 0
+    assert another_feature_segment.priority == 1
+    data = [
+        {"id": feature_segment.id, "priority": 1},
+        {"id": another_feature_segment.id, "priority": 0},
+    ]
 
-        # Then the segments are reordered
-        assert response.status_code == status.HTTP_200_OK
-        json_response = response.json()
-        assert json_response[0]["id"] == feature_segment_1.id
-        assert json_response[1]["id"] == feature_segment_2.id
+    # When
+    response = client.post(url, data=json.dumps(data), content_type="application/json")
+
+    # Then the segments are reordered
+    assert response.status_code == status.HTTP_200_OK
+    json_response = response.json()
+    assert json_response[0]["id"] == feature_segment.id
+    assert json_response[1]["id"] == another_feature_segment.id
+
+
+@pytest.mark.parametrize(
+    "client", [lazy_fixture("master_api_key_client"), lazy_fixture("admin_client")]
+)
+def test_update_priorities_empty_list(client):
+    # Given
+    url = reverse("api-v1:features:feature-segment-update-priorities")
+
+    # When
+    response = client.post(url, data=json.dumps([]), content_type="application/json")
+
+    # Then the segments are reordered
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json() == []
+
+
+@pytest.mark.parametrize(
+    "client", [lazy_fixture("master_api_key_client"), lazy_fixture("admin_client")]
+)
+def test_get_feature_segment_by_uuid(
+    feature_segment, project, client, environment, feature
+):
+    # Given
+    url = reverse(
+        "api-v1:features:feature-segment-get-by-uuid", args=[feature_segment.uuid]
+    )
+
+    # When
+    response = client.get(url)
+
+    # Then
+    assert response.status_code == status.HTTP_200_OK
+    json_response = response.json()
+    assert json_response["id"] == feature_segment.id
+    assert json_response["uuid"] == str(feature_segment.uuid)
+
+
+@pytest.mark.parametrize(
+    "client", [lazy_fixture("master_api_key_client"), lazy_fixture("admin_client")]
+)
+def test_get_feature_segment_by_id(
+    feature_segment, project, client, environment, feature
+):
+    # Given
+    url = reverse("api-v1:features:feature-segment-detail", args=[feature_segment.id])
+
+    # When
+    response = client.get(url)
+
+    # Then
+    assert response.status_code == status.HTTP_200_OK
+    json_response = response.json()
+    assert json_response["id"] == feature_segment.id
+    assert json_response["uuid"] == str(feature_segment.uuid)
+
+
+@pytest.mark.parametrize(
+    "client", [lazy_fixture("master_api_key_client"), lazy_fixture("admin_client")]
+)
+def test_creating_segment_override_for_feature_based_segment_returns_400_for_wrong_feature(
+    client, feature_based_segment, project, environment
+):
+    # Given - A different feature
+    feature = Feature.objects.create(name="Feature 2", project=project)
+    data = {
+        "feature": feature.id,
+        "segment": feature_based_segment.id,
+        "environment": environment.id,
+    }
+    url = reverse("api-v1:features:feature-segment-list")
+
+    # When
+    response = client.post(url, data=json.dumps(data), content_type="application/json")
+
+    # Then
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert (
+        response.json()["feature"][0]
+        == "Can only create segment override(using this segment) for feature %d"
+        % feature_based_segment.feature.id
+    )
+
+
+@pytest.mark.parametrize(
+    "client", [lazy_fixture("master_api_key_client"), lazy_fixture("admin_client")]
+)
+def test_creating_segment_override_for_feature_based_segment_returns_201_for_correct_feature(
+    client, feature_based_segment, project, environment, feature
+):
+    # Given
+    data = {
+        "feature": feature.id,
+        "segment": feature_based_segment.id,
+        "environment": environment.id,
+    }
+    url = reverse("api-v1:features:feature-segment-list")
+
+    # When
+    response = client.post(url, data=json.dumps(data), content_type="application/json")
+    # Then
+    assert response.status_code == status.HTTP_201_CREATED
