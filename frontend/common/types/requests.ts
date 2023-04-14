@@ -1,4 +1,4 @@
-import { Segment, Tag } from './responses'
+import { Account, Segment, Tag } from './responses';
 
 export type PagedRequest<T> = T & {
   page?: number
@@ -65,5 +65,6 @@ export type Req = {
   }
   createTag: { projectId: string; tag: Omit<Tag, 'id'> }
   getSegment: { projectId: string; id: string }
+  updateAccount: Account
   // END OF TYPES
 }
