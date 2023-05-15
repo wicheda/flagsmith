@@ -60,6 +60,10 @@ function go_to_sleep(){
     echo "Sleeping for ${1} seconds before startup"
     sleep ${1}
 }
+function init_self_hosted(){
+    python manage.py waitfordb --waitfor 90 --migrations
+    python manage.py initselfhosted
+}
 
 if [ "$1" == "migrate" ]; then
     if [ $# -eq 2 ]; then go_to_sleep "$2"; fi
@@ -81,6 +85,8 @@ elif [ "$1" == "dump-organisation-to-s3" ]; then
     dump_organisation_to_s3 "$2" "$3" "$4"
 elif [ "$1" == "dump-organisation-to-local-fs" ]; then
     dump_organisation_to_local_fs "$2" "$3"
+elif [ "$1" == "init-self-hosted" ]; then
+    init_self_hosted
 else
    echo "ERROR: unrecognised command '$1'"
 fi
